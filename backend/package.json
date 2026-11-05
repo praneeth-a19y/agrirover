@@ -1,0 +1,21 @@
+{
+  "name": "smart-agri-rover-backend",
+  "version": "1.0.0",
+  "description": "Smart Agriculture Rover IoT Backend — Express, MQTT, Socket.IO & ESP32 Integration",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mqtt": "^5.5.2",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.4"
+  }
+}
