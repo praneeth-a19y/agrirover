@@ -1,193 +1,210 @@
-# Smart Agriculture Rover — AI-Powered Crop & Soil IoT Monitoring System
+# AgriRover — AI-Powered Smart Agriculture IoT Platform
 
-> **College EPICS Engineering Project**  
-> An autonomous/teleoperated four-wheel agricultural rover integrating real-time MQTT IoT communication, two-point soil chemistry calibration, edge vision via ESP32-CAM, and machine learning foliar disease diagnosis.
-
----
-
-## 1. Full-Stack IoT System Architecture
-
-```
-               +--------------------------------------------------------+
-               |              4-Wheel Mobile Rover Hardware             |
-               |       ESP32 DevKit V1 + L298N Dual H-Bridge Driver     |
-               |      Sensors: DHT22, Capacitive Moisture, pH Probe     |
-               +---------------------------+----------------------------+
-                                           |
-                                (MQTT Pub/Sub Protocol)
-                                           v
-               +--------------------------------------------------------+
-               |                  Public or Local MQTT Broker           |
-               |       (broker.emqx.io:1883 or test.mosquitto.org)       |
-               +---------------------------+----------------------------+
-                                           |
-                                (MQTT Pub/Sub Protocol)
-                                           v
-               +--------------------------------------------------------+
-               |           Node.js + Express + MQTT.js Backend          |
-               |     - SQLite Database (agri_rover.db)                  |
-               |     - MQTT Engine: devices/{id}/(command|telemetry|ack)|
-               |     - Socket.IO Real-Time Event Broadcaster            |
-               |     - PlantVillage 38-Class Agronomic Diagnostic Engine|
-               +---------------------------+----------------------------+
-                                           |
-                             (Socket.IO & HTTP REST API)
-                                           v
-               +--------------------------------------------------------+
-               |         React 18 + TypeScript + Vite Dashboard         |
-               |        (Real-time D-Pad, Live Charts, Alerts)          |
-               +--------------------------------------------------------+
-```
+> **Live Production Architecture:** React + TypeScript (Vite) Frontend | Node.js Express & Socket.IO Backend on Render | EMQX Cloud Serverless MQTT (TLS 8883) | ESP32 DevKit V1 (4WD L298N + DHT22 + Capacitive Moisture + Analog pH)
 
 ---
 
-## 2. MQTT Communication Pipeline & Topic Structure
-
-Communication flows bidirectionally between the Website, Backend, MQTT Broker, and ESP32 hardware:
+## 1. System Architecture & Cloud Topology
 
 ```
-[Website Dashboard] ──(REST/Socket.IO)──> [Backend Server] ──(MQTT Publish)──> [Broker] ──> [ESP32 Rover]
-                                                                                               │
-                                                                                          Actuate Motors
-                                                                                               │
-[Website Dashboard] <──(Socket.IO Push)── [Backend Server] <──(MQTT Publish)── [Broker] <── [ESP32 Ack]
++-----------------------------------------------------------------------------------+
+|                            PUBLIC INTERNET / BROWSER                              |
+|   https://<your-app>.onrender.com (React 18 + Tailwind + Recharts + Socket.IO)    |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                      (HTTPS REST API & WSS WebSockets)
+                                          v
++-----------------------------------------------------------------------------------+
+|                        RENDER CLOUD WEB SERVICE (Frankfurt)                       |
+|   Node.js 20+ Express Backend                                                     |
+|   - Port: process.env.PORT (10000 on Render)                                      |
+|   - Serves Frontend Single-Page App & REST Endpoints (/api/v1/...)                |
+|   - Real-Time Socket.IO Broadcaster                                               |
+|   - SQLite Database & Alert Engine                                                |
+|   - MQTTS TLS Client with DigiCert Root CA Validation                             |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                        (MQTTS TLS Port 8883 / TLS v1.3)
+                        Auth: agrirover_backend
+                                          v
++-----------------------------------------------------------------------------------+
+|                            EMQX CLOUD SERVERLESS BROKER                           |
+|   Host: ed61a166.ala.eu-central-1.emqxsl.com (Port 8883 TLS)                      |
+|   - devices/agrirover-01/command   (Backend Publishes -> ESP32 Subscribes)        |
+|   - devices/agrirover-01/ack       (ESP32 Publishes -> Backend Subscribes)        |
+|   - devices/agrirover-01/telemetry (ESP32 Publishes -> Backend Subscribes)        |
+|   - devices/agrirover-01/status    (ESP32 Publishes -> Backend Subscribes + LWT)  |
++-----------------------------------------+-----------------------------------------+
+                                          ^
+                        (MQTTS TLS Port 8883 / TLS v1.3)
+                        Auth: agrirover_esp32
+                                          |
++-----------------------------------------+-----------------------------------------+
+|                       ESP32 ROVER EMBEDDED HARDWARE                               |
+|   ESP32 DevKit V1 (WiFiClientSecure + PubSubClient + ArduinoJson)                 |
+|   - Pins 18, 19, 21, 22, 23, 25: L298N Dual H-Bridge (4WD Motors + Watchdog)    |
+|   - Pin 4: DHT22 Canopy Temperature & Humidity                                    |
+|   - Pin 34: Capacitive Soil Moisture Sensor V1.2 (ADC1_CH6)                       |
+|   - Pin 35: Analog Soil pH Sensor Board (ADC1_CH7)                                |
+|   - Pin 36: Battery Voltage Divider (ADC1_CH0)                                    |
+|   - Pin 2: Auxiliary Headlight / Status LED                                       |
++-----------------------------------------------------------------------------------+
 ```
-
-### Topic Conventions
-
-| Direction | MQTT Topic | Purpose | Payload Schema |
-| :--- | :--- | :--- | :--- |
-| **Backend → ESP32** | `devices/{deviceId}/command` | Motor actuation, motion pulses, emergency stop | `{"commandId":"...","deviceId":"rover-001","type":"FORWARD","durationMs":1000}` |
-| **ESP32 → Backend** | `devices/{deviceId}/ack` | Execution confirmation from physical hardware | `{"commandId":"...","deviceId":"rover-001","status":"executed","message":"..."}` |
-| **ESP32 → Backend** | `devices/{deviceId}/telemetry`| Periodic environmental & soil sensor readings | `{"deviceId":"rover-001","temperature":28.5,"humidity":65,"rawMoistureAdc":2100,...}` |
-| **ESP32 → Backend** | `devices/{deviceId}/status` | Heartbeat & Last Will and Testament (LWT) | `{"deviceId":"rover-001","is_online":true,"battery_percent":92,"signal_rssi":-62}` |
 
 ---
 
-## 3. Hardware Pinout & Wiring (ESP32 DevKit V1)
+## 2. Diagnosing & Fixing the Render Deployment Failure
 
-| Component | Pin Label | ESP32 GPIO | Description / Operating Voltage |
-| :--- | :--- | :--- | :--- |
-| **DHT22 Sensor** | DATA | **GPIO 4** | 1-Wire Digital Signal (10kΩ pullup to 3.3V) |
-| **Capacitive Moisture Sensor**| AOUT | **GPIO 34** | Analog ADC1 Channel 6 (0–3.3V) |
-| **Analog pH Sensor Board** | AOUT | **GPIO 35** | Analog ADC1 Channel 7 (0–3.3V output) |
-| **Battery Divider (2:1)** | V_SENSE | **GPIO 36** | 10kΩ / 10kΩ resistor divider from battery |
-| **Status LED** | LED | **GPIO 2** | Built-in Blue LED Indicator (Auxiliary Light) |
-| **L298N Motor Driver** | IN1 | **GPIO 18** | Left Motors Forward |
-| | IN2 | **GPIO 19** | Left Motors Reverse |
-| | IN3 | **GPIO 21** | Right Motors Forward |
-| | IN4 | **GPIO 22** | Right Motors Reverse |
-| | ENA | **GPIO 23** | Left Motor PWM Speed Enable |
-| | ENB | **GPIO 25** | Right Motor PWM Speed Enable |
-| | GND | **GND** | **Common Ground** with ESP32 & Battery |
+### Root Cause of Previous Failure
+When the repository was first connected to Render without configuration:
+1. Render inspected the root repository directory and found Python scripts (`launch.py`, `train_epics_model.py`).
+2. Render inferred the runtime was **Python 3.14.x**.
+3. It attempted to run:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. It failed with `Error: Could not open requirements file: No such file or directory: requirements.txt` because the primary server is **Node.js**, and dependencies were located inside `backend/package.json` and `frontend/package.json`.
 
-> [!IMPORTANT]
-> **Common Ground:** The ground (GND) of the battery, L298N driver, buck converter, and ESP32 **must all be connected together**.
+### Permanent Solution Implemented
+1. **Infrastructure as Code (`render.yaml`)**:
+   Render now natively detects the [`render.yaml`](render.yaml) blueprint, locking the runtime to **Node.js** in region `frankfurt` (closest to EMQX Cloud `eu-central-1`), using the Free tier.
+2. **Root `package.json` & Build Pipeline**:
+   Added a root [`package.json`](package.json) orchestrating:
+   - `npm run build`: Compiles the React Vite frontend into `frontend/dist` and installs backend dependencies.
+   - `npm start`: Starts `backend/server.js`.
+3. **Unified Single-Service Hosting (Option A)**:
+   In production, `backend/server.js` serves the compiled frontend assets directly from `frontend/dist`.
+   - **Zero CORS issues** because the browser and API share the same origin.
+   - **Zero extra cost** on the Render Free plan.
+   - Socket.IO connects directly to `/` with no configuration.
+4. **Fallback `requirements.txt`**:
+   Created a root [`requirements.txt`](requirements.txt) to prevent pipeline failures if Python is accidentally selected.
 
 ---
 
-## 4. Quick Start & Execution
+## 3. Render Deployment Setup (Step-by-Step)
 
-### 🚀 Recommended 1-Line Launch (Starts Backend + Frontend + Auto-Browser)
+### Option 1: Automatic Deploy via Blueprint (`render.yaml`) — Recommended
+1. Log in to [Render Dashboard](https://dashboard.render.com).
+2. Click **New +** → **Blueprint**.
+3. Connect your GitHub repository: `praneeth-a19y/agrirover`.
+4. Render will parse `render.yaml` automatically.
+5. In the **Environment Variables** prompt, enter:
+   - `MQTT_PASSWORD`: *(Your EMQX Cloud password for `agrirover_backend`)*
+6. Click **Apply**. Render will build and deploy your live public website!
 
-Open Terminal on macOS / Linux and run:
+### Option 2: Manual Web Service Setup on Render
+If creating a manual Web Service instead of using the Blueprint:
+- **Type**: Web Service
+- **Name**: `agrirover`
+- **Region**: `Frankfurt (EU Central)` *(matches EMQX Cloud)*
+- **Branch**: `main`
+- **Runtime**: `Node`
+- **Build Command**: `npm run build`
+- **Start Command**: `npm start`
+- **Plan**: `Free`
+- **Health Check Path**: `/health`
 
+#### Environment Variables to Set on Render:
+| Variable Key | Recommended Value | Description |
+| :--- | :--- | :--- |
+| `NODE_ENV` | `production` | Enables production optimizations & static serving |
+| `MQTT_HOST` | `ed61a166.ala.eu-central-1.emqxsl.com` | EMQX Cloud Serverless broker host |
+| `MQTT_PORT` | `8883` | Secure MQTTS TLS port |
+| `MQTT_TLS` | `true` | Enforces TLS with certificate verification |
+| `MQTT_USERNAME` | `agrirover_backend` | Backend MQTT user |
+| `MQTT_PASSWORD` | `<your_backend_mqtt_password>` | Entered securely in Render settings |
+| `MQTT_CLIENT_ID`| `agrirover-backend` | Client ID identifier |
+| `DEVICE_ID` | `agrirover-01` | Default rover hardware identifier |
+| `DEFAULT_DEVICE_ID` | `agrirover-01` | Matching device filter |
+| `FRONTEND_ORIGIN` | `*` | Allowed CORS origin |
+
+---
+
+## 4. EMQX Cloud MQTT Serverless Configuration
+
+### Broker Overview
+- **Broker Host**: `ed61a166.ala.eu-central-1.emqxsl.com`
+- **TLS Port**: `8883` (MQTTS over TLS v1.3 / v1.2)
+- **WebSockets Port**: `8084` (WSS)
+- **Certificate Authority**: Signed by **DigiCert Global Root CA** (Valid through 2027+). Embedded in `backend/certs/emqx-ca.pem`.
+
+### MQTT Topic Topology
+
+| MQTT Topic | Direction | Content |
+| :--- | :--- | :--- |
+| `devices/{deviceId}/command` | Backend → ESP32 | Motor actuation & teleoperation (`FORWARD`, `BACKWARD`, `LEFT`, `RIGHT`, `STOP`, `EMERGENCY_STOP`, `LED_SET`) |
+| `devices/{deviceId}/ack` | ESP32 → Backend | Hardware confirmation (`{"commandId":"...","status":"executed"}`) |
+| `devices/{deviceId}/telemetry`| ESP32 → Backend | Real-time sensor packet (Temp, Humidity, Soil Moisture ADC, pH Voltage, Battery) |
+| `devices/{deviceId}/status` | ESP32 → Backend | Heartbeat & Last Will and Testament (LWT) (`{"is_online":true/false}`) |
+
+### Recommended Access Control (ACL) in EMQX Cloud Dashboard
+Under **EMQX Cloud Console** → **Authentication** & **Access Control**:
+1. **User `agrirover_backend`**:
+   - **Publish Rule**: Allow `devices/+/command`, `devices/agrirover-01/command`
+   - **Subscribe Rule**: Allow `devices/+/telemetry`, `devices/+/status`, `devices/+/ack`
+2. **User `agrirover_esp32`**:
+   - **Subscribe Rule**: Allow `devices/agrirover-01/command`
+   - **Publish Rule**: Allow `devices/agrirover-01/telemetry`, `devices/agrirover-01/status`, `devices/agrirover-01/ack`
+
+---
+
+## 5. ESP32 Firmware Setup & Secure Flashing
+
+### 1. Configure Private Credentials
+In `hardware/esp32_rover_firmware/`:
+1. Copy `secrets.h.example` to `secrets.h`:
+   ```bash
+   cp hardware/esp32_rover_firmware/secrets.h.example hardware/esp32_rover_firmware/secrets.h
+   ```
+2. Open `secrets.h` and fill in:
+   ```cpp
+   #define SECRET_WIFI_SSID     "Your_Home_WiFi_Or_Hotspot"
+   #define SECRET_WIFI_PASSWORD "Your_WiFi_Password"
+   #define SECRET_MQTT_PASSWORD "Your_ESP32_MQTT_Password"
+   ```
+   *(Note: `secrets.h` is excluded by `.gitignore` so your private credentials will never be committed).*
+
+### 2. Required Arduino IDE Libraries
+Install via **Tools** → **Manage Libraries**:
+- `PubSubClient` by Nick O'Leary
+- `ArduinoJson` by Benoit Blanchon (v6 or v7)
+- `DHT sensor library` by Adafruit
+- `Adafruit Unified Sensor`
+
+### 3. Flash to ESP32
+1. Open [`hardware/esp32_rover_firmware/esp32_rover_firmware.ino`](hardware/esp32_rover_firmware/esp32_rover_firmware.ino).
+2. Select **Board**: `ESP32 Dev Module`.
+3. Connect your ESP32 via USB and select the serial port.
+4. Click **Upload**.
+5. Open Serial Monitor at **115200 baud** to view TLS handshake and telemetry output.
+
+---
+
+## 6. Testing with the Hardware Simulator
+
+If your physical rover is not powered or wired yet, test the full cloud loop with the simulator:
+
+```bash
+# Syntax: node hardware/simulate_esp32_rover.js [deviceId] [brokerUrl] [username] [password]
+node hardware/simulate_esp32_rover.js agrirover-01 mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883 agrirover_esp32 <YOUR_PASSWORD>
+```
+
+1. The simulator performs a secure TLS handshake with EMQX Cloud.
+2. It publishes `is_online: true` to `devices/agrirover-01/status`.
+3. Your Render website dashboard status pill immediately turns **Green (ONLINE)**.
+4. The simulator publishes telemetry every 5 seconds.
+5. Click **FWD** or **REV** on your live website: the simulator receives the command, logs motor pins, and returns an execution ack; the website displays confirmation.
+
+---
+
+## 7. Local Development
+
+To run both backend and frontend locally:
 ```bash
 python3 launch.py
 ```
 *(or run `./run_project.sh`)*
 
-- **Web Dashboard**: [http://localhost:3000](http://localhost:3000)
-- **Backend Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
-
----
-
-## 5. Testing Without Physical Hardware (ESP32 Simulator)
-
-If your ESP32 is not yet wired or you want to demonstrate the platform locally on your computer:
-
-In a separate terminal window, launch the **Hardware Simulator**:
-```bash
-node hardware/simulate_esp32_rover.js
-```
-
-1. The simulator connects to the MQTT broker as `rover-001`.
-2. The dashboard header instantly turns **Green: Connected (ONLINE)**.
-3. Every 5 seconds, live DHT22, soil moisture, and pH telemetry appear on the dashboard in real time.
-4. Click **FWD**, **REV**, **LEFT**, **RIGHT**, or **STOP** on the website:
-   - The simulator receives the MQTT command.
-   - It actuates the simulated motors.
-   - It publishes an MQTT acknowledgement back.
-   - The website turns green and displays: *"Command executed successfully"*.
-
----
-
-## 6. Flashing the Physical ESP32 Firmware
-
-1. Install the [Arduino IDE](https://www.arduino.cc/en/software).
-2. Add ESP32 Board Support:
-   - Go to **Preferences** → **Additional Boards Manager URLs**:  
-     `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-   - Open **Tools** → **Board Manager**, search for `esp32`, and click **Install**.
-3. Install required libraries via **Sketch** → **Include Library** → **Manage Libraries**:
-   - `PubSubClient` by Nick O'Leary
-   - `ArduinoJson` by Benoit Blanchon (v6 or v7)
-   - `DHT sensor library` by Adafruit
-   - `Adafruit Unified Sensor`
-4. Open [hardware/esp32_rover_firmware/esp32_rover_firmware.ino](hardware/esp32_rover_firmware/esp32_rover_firmware.ino).
-5. Update your Wi-Fi credentials at lines 40-41:
-   ```cpp
-   const char* WIFI_SSID     = "YOUR_WIFI_NAME";
-   const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-   ```
-6. Select **Tools** → **Board** → **ESP32 Dev Module** and choose your Serial Port.
-7. Click **Upload**.
-8. Open the Serial Monitor at **115200 baud** to verify connection.
-
----
-
-## 7. Environment Variables (`.env`)
-
-Configure in `backend/.env`:
-
-```env
-PORT=8000
-HOST=0.0.0.0
-NODE_ENV=development
-CORS_ORIGIN=*
-
-DEFAULT_DEVICE_ID=rover-001
-DEFAULT_FARM_ID=farm-001
-DEFAULT_PLOT_ID=plot-001
-
-# MQTT Broker (EMQX Cloud, Mosquitto, or local)
-MQTT_BROKER_URL=mqtt://broker.emqx.io:1883
-MQTT_CLIENT_ID=agri-rover-backend-server
-MQTT_USERNAME=
-MQTT_PASSWORD=
-MQTT_KEEPALIVE=60
-MQTT_RECONNECT_PERIOD=5000
-
-ROVER_OFFLINE_THRESHOLD_SECONDS=15
-DB_PATH=../agri_rover.db
-```
-
----
-
-## 8. Verification & Test Suite
-
-Run the automated end-to-end integration test:
-
-```bash
-# Ensure backend is running, then run:
-node backend/tests/test_mqtt_pipeline.js
-```
-
-This automated test validates:
-- [x] Backend REST API health
-- [x] MQTT broker connectivity
-- [x] Socket.IO real-time event pipeline
-- [x] ESP32 telemetry ingestion and calibration
-- [x] Command validation, queueing, and dispatching
-- [x] ESP32 motor actuation & execution acknowledgement
-- [x] Security rate limiting & invalid command rejection
+- **Dashboard UI**: [http://localhost:3000](http://localhost:3000) (Dev) or [http://localhost:8000](http://localhost:8000) (Unified)
+- **API Health**: [http://localhost:8000/health](http://localhost:8000/health)

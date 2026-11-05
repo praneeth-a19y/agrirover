@@ -52,7 +52,11 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     mqtt_connected: isMqttConnected(),
     mqtt_broker: config.mqtt.brokerUrl,
+    mqtt_host: config.mqtt.host,
+    mqtt_tls: config.mqtt.tls,
+    device_id: config.defaultDeviceId,
     node_version: process.version,
+    frontend_served: fs.existsSync(path.resolve(__dirname, '../frontend/dist')),
   });
 });
 
@@ -63,7 +67,25 @@ app.post('/upload', upload.single('image'), (req, res, next) => {
   diseaseController.predict(req, res, next);
 });
 
-// 6. Centralized Error Handler
+// 6. Serve Compiled Frontend in Production (Option A: Unified Web Service on Render)
+const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/static') ||
+      req.path.startsWith('/health') ||
+      req.path.startsWith('/predict') ||
+      req.path.startsWith('/upload')
+    ) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
+
+// 7. Centralized Error Handler
 app.use(errorHandler);
 
 // 7. Create HTTP Server & Bind Real-Time Services

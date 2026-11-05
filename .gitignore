@@ -44,3 +44,7 @@ backend/static/uploads/*.jpg
 backend/static/uploads/*.png
 backend/static/uploads/*.jpeg
 !backend/static/uploads/.gitkeep
+
+# Hardware secrets & private credentials
+secrets.h
+hardware/**/secrets.h

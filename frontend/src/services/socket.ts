@@ -5,11 +5,16 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const socketUrl = window.location.port === '3000' ? 'http://localhost:8000' : window.location.origin;
+    const customSocketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL;
+    const socketUrl = customSocketUrl
+      ? customSocketUrl.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '')
+      : window.location.port === '3000'
+      ? 'http://localhost:8000'
+      : window.location.origin;
 
     socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 15,
       reconnectionDelay: 2000,
       timeout: 10000,
     });

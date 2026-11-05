@@ -220,13 +220,18 @@ function seedInitialData() {
     );
   }
 
-  // Seed Rover Status
-  const rover = db.prepare('SELECT * FROM rover_status WHERE device_id = ?').get('rover-001');
-  if (!rover) {
-    db.prepare(`
-      INSERT INTO rover_status (device_id, name, is_online, battery_percent, signal_rssi, ip_address, mode, last_heartbeat)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('rover-001', 'Smart AgriRover 4WD', 0, 92.0, -62, '192.168.1.120', 'MANUAL', new Date().toISOString());
+  // Seed Rover Status for agrirover-01 and rover-001
+  const targetDeviceId = config.defaultDeviceId || 'agrirover-01';
+  const devicesToSeed = Array.from(new Set([targetDeviceId, 'agrirover-01', 'rover-001']));
+
+  for (const devId of devicesToSeed) {
+    const existingRover = db.prepare('SELECT * FROM rover_status WHERE device_id = ?').get(devId);
+    if (!existingRover) {
+      db.prepare(`
+        INSERT INTO rover_status (device_id, name, is_online, battery_percent, signal_rssi, ip_address, mode, last_heartbeat)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(devId, `AgriRover [${devId}]`, 0, 92.0, -62, '192.168.1.120', 'MANUAL', new Date().toISOString());
+    }
   }
 
   // Seed Sensor Calibration

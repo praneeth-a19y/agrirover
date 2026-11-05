@@ -1,0 +1,16 @@
+{
+  "name": "agrirover",
+  "version": "1.0.0",
+  "description": "Smart Agriculture Rover — Full-Stack IoT Platform on Render + EMQX Cloud",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "build:backend": "cd backend && npm install",
+    "start": "cd backend && node server.js",
+    "test": "cd backend && node tests/test_mqtt_pipeline.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

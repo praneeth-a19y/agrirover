@@ -1,0 +1,2 @@
+# Fallback Python requirements for root workspace
+-r backend/requirements.txt

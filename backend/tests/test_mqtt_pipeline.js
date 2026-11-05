@@ -24,10 +24,23 @@ async function runTests() {
 
   // 2. Connect Simulated ESP32 via MQTT
   console.log('\n▶ Step 2: Connecting Simulated ESP32 to MQTT Broker...');
-  const espMqtt = mqtt.connect(config.mqtt.brokerUrl, {
+  const espOptions = {
     clientId: `TestESP32-${Date.now()}`,
     clean: true,
-  });
+    connectTimeout: 8000,
+  };
+  if (config.mqtt.tls || config.mqtt.brokerUrl.startsWith('mqtts://')) {
+    espOptions.rejectUnauthorized = true;
+    if (config.mqtt.caCert) {
+      espOptions.ca = [config.mqtt.caCert];
+    }
+  }
+  if (config.mqtt.username) {
+    espOptions.username = process.env.MQTT_ESP32_USERNAME || 'agrirover_esp32';
+    espOptions.password = process.env.MQTT_ESP32_PASSWORD || config.mqtt.password;
+  }
+
+  const espMqtt = mqtt.connect(config.mqtt.brokerUrl, espOptions);
 
   await new Promise((resolve) => espMqtt.on('connect', resolve));
   console.log(`✔ Simulated ESP32 connected to broker: ${config.mqtt.brokerUrl}`);

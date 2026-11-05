@@ -12,7 +12,12 @@ let isConnected = false;
 function isValidDeviceId(deviceId) {
   if (!deviceId) return false;
   const d = String(deviceId).toLowerCase();
-  if (d === config.defaultDeviceId.toLowerCase() || d.startsWith('rover') || d.startsWith('esp32')) {
+  if (
+    d === config.defaultDeviceId.toLowerCase() ||
+    d.startsWith('agrirover') ||
+    d.startsWith('rover') ||
+    d.startsWith('esp32')
+  ) {
     return true;
   }
   const exists = db.prepare('SELECT 1 FROM rover_status WHERE device_id = ?').get(deviceId);
@@ -20,7 +25,7 @@ function isValidDeviceId(deviceId) {
 }
 
 function initMQTT() {
-  logger.mqtt('INIT', `Connecting to MQTT Broker: ${config.mqtt.brokerUrl}`);
+  logger.mqtt('INIT', `Connecting to MQTT Broker: ${config.mqtt.brokerUrl} (TLS: ${config.mqtt.tls})`);
 
   const options = {
     clientId: config.mqtt.clientId,
@@ -29,6 +34,13 @@ function initMQTT() {
     reconnectPeriod: config.mqtt.reconnectPeriod,
     keepalive: config.mqtt.keepalive,
   };
+
+  if (config.mqtt.tls || config.mqtt.brokerUrl.startsWith('mqtts://')) {
+    options.rejectUnauthorized = true; // Strict TLS verification enabled
+    if (config.mqtt.caCert) {
+      options.ca = [config.mqtt.caCert];
+    }
+  }
 
   if (config.mqtt.username) {
     options.username = config.mqtt.username;
@@ -191,11 +203,11 @@ function publishCommand(deviceId, commandRecord) {
     id: commandRecord.id,
     deviceId: deviceId,
     device_id: deviceId,
-    type: commandRecord.command,
+    type: commandRecord.command === 'LED_SET' ? 'LED_SET' : 'MOTOR_CONTROL',
+    value: commandRecord.command === 'LED_SET' ? commandRecord.value : commandRecord.command,
     command: commandRecord.command,
     durationMs: commandRecord.duration_ms || 1000,
     duration_ms: commandRecord.duration_ms || 1000,
-    value: commandRecord.value,
     timestamp: new Date().toISOString(),
   };
 

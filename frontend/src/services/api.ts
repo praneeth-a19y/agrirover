@@ -13,7 +13,10 @@ import {
   ModelStatus
 } from '../types';
 
-const API_BASE = '/api/v1';
+const customApiBase = import.meta.env.VITE_API_BASE_URL;
+const API_BASE = customApiBase
+  ? `${customApiBase.replace(/\/+$/, '')}${customApiBase.endsWith('/api/v1') ? '' : '/api/v1'}`
+  : '/api/v1';
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;

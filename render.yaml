@@ -1,0 +1,39 @@
+services:
+  # ==============================================================================
+  # SMART AGRICULTURE ROVER — UNIFIED WEB SERVICE (Option A - Free Tier Recommended)
+  # Hosts both the Node.js IoT Backend and the compiled React Frontend together.
+  # Zero CORS configuration required, WebSocket on same origin, free tier friendly.
+  # ==============================================================================
+  - type: web
+    name: agrirover
+    runtime: node
+    region: frankfurt # Closest to EMQX Cloud eu-central-1 broker
+    plan: free
+    branch: main
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MQTT_HOST
+        value: ed61a166.ala.eu-central-1.emqxsl.com
+      - key: MQTT_PORT
+        value: "8883"
+      - key: MQTT_TLS
+        value: "true"
+      - key: MQTT_USERNAME
+        value: agrirover_backend
+      - key: MQTT_PASSWORD
+        sync: false # Set securely in Render dashboard
+      - key: MQTT_CLIENT_ID
+        value: agrirover-backend
+      - key: DEVICE_ID
+        value: agrirover-01
+      - key: DEFAULT_DEVICE_ID
+        value: agrirover-01
+      - key: FRONTEND_ORIGIN
+        value: "*"
+      - key: SIMULATED_DATA_ENABLED
+        value: "false"
