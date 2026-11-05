@@ -37,7 +37,10 @@ function initMQTT() {
 
   if (config.mqtt.tls || config.mqtt.brokerUrl.startsWith('mqtts://')) {
     options.rejectUnauthorized = true; // Strict TLS verification enabled
-    if (config.mqtt.caCert) {
+    if (config.mqtt.host) {
+      options.servername = config.mqtt.host;
+    }
+    if (config.mqtt.caCert && config.mqtt.caCert.includes('-----BEGIN CERTIFICATE-----')) {
       options.ca = [config.mqtt.caCert];
     }
   }

@@ -25,21 +25,35 @@ if (process.env.MQTT_BROKER_URL && !process.env.MQTT_HOST) {
 }
 
 // CA Certificate handling
-let caCert = process.env.MQTT_CA_CERT || '';
-const localCaFile = path.resolve(__dirname, '../certs/emqx-ca.pem');
-if (!caCert && fs.existsSync(localCaFile)) {
-  try {
-    caCert = fs.readFileSync(localCaFile, 'utf8');
-  } catch (err) {
-    // Ignore read error
+let caCert = (process.env.MQTT_CA_CERT || '').trim();
+
+if (caCert && caCert.includes('-----BEGIN CERTIFICATE-----')) {
+  // It's already the raw PEM certificate string
+} else {
+  // Treat as potential relative or absolute file path
+  const candidatePaths = [
+    caCert ? path.resolve(process.cwd(), caCert) : null,
+    caCert ? path.resolve(__dirname, '..', caCert) : null,
+    path.resolve(__dirname, '../certs/emqx-ca.pem'),
+    path.resolve(process.cwd(), 'backend/certs/emqx-ca.pem'),
+    path.resolve(process.cwd(), 'certs/emqx-ca.pem'),
+  ].filter(Boolean);
+
+  let loadedCert = '';
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const content = fs.readFileSync(p, 'utf8').trim();
+        if (content.includes('-----BEGIN CERTIFICATE-----')) {
+          loadedCert = content;
+          break;
+        }
+      } catch (err) {
+        // Continue searching
+      }
+    }
   }
-} else if (caCert && fs.existsSync(caCert)) {
-  // If MQTT_CA_CERT is a file path rather than the PEM content itself
-  try {
-    caCert = fs.readFileSync(caCert, 'utf8');
-  } catch (err) {
-    // Ignore
-  }
+  caCert = loadedCert;
 }
 
 const frontendOrigin = process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || '*';
