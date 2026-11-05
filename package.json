@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "npm run build:frontend && npm run build:backend && mkdir -p node_modules/.bin && cp bin/agrirover.js node_modules/.bin/agrirover && chmod +x node_modules/.bin/agrirover bin/agrirover.js agrirover",
-    "build:frontend": "cd frontend && npm install && npm run build",
-    "build:backend": "cd backend && npm install",
+    "build:frontend": "cd frontend && npm install --include=dev && npm run build",
+    "build:backend": "cd backend && npm install --include=dev",
     "start": "cd backend && node server.js",
     "test": "cd backend && node tests/test_mqtt_pipeline.js"
   },

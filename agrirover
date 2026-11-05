@@ -42,7 +42,7 @@ fi
 if [ ! -f "$ROOT_DIR/frontend/dist/index.html" ]; then
   echo "[agrirover] Compiling React frontend assets..."
   cd "$ROOT_DIR/frontend"
-  npm install --no-audit --no-fund
+  npm install --include=dev --no-audit --no-fund
   npm run build
   cd "$ROOT_DIR"
 fi
@@ -51,7 +51,7 @@ fi
 if [ ! -d "$ROOT_DIR/backend/node_modules" ]; then
   echo "[agrirover] Installing backend dependencies..."
   cd "$ROOT_DIR/backend"
-  npm install --no-audit --no-fund
+  npm install --include=dev --no-audit --no-fund
   cd "$ROOT_DIR"
 fi
 
