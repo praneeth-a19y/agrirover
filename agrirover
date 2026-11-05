@@ -1,13 +1,60 @@
 #!/usr/bin/env bash
-# Locate project root and start backend server
+set -e
+
+# Smart Agriculture Rover — Universal Startup Script
+# Works across Node.js runtimes, Python virtual environments, Render.com and local machines.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -d "$SCRIPT_DIR/backend" ]; then
-  cd "$SCRIPT_DIR/backend"
-elif [ -d "$SCRIPT_DIR/../backend" ]; then
-  cd "$SCRIPT_DIR/../backend"
-elif [ -d "$SCRIPT_DIR/../../backend" ]; then
-  cd "$SCRIPT_DIR/../../backend"
-elif [ -d "./backend" ]; then
-  cd "./backend"
+ROOT_DIR=""
+
+if [ -f "$SCRIPT_DIR/backend/server.js" ]; then
+  ROOT_DIR="$SCRIPT_DIR"
+elif [ -f "$SCRIPT_DIR/../backend/server.js" ]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$SCRIPT_DIR/../../backend/server.js" ]; then
+  ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+elif [ -f "./backend/server.js" ]; then
+  ROOT_DIR="$(pwd)"
+elif [ -f "/opt/render/project/src/backend/server.js" ]; then
+  ROOT_DIR="/opt/render/project/src"
 fi
+
+if [ -z "$ROOT_DIR" ]; then
+  echo "[agrirover] ERROR: Could not locate backend/server.js in $SCRIPT_DIR or $(pwd)"
+  exit 1
+fi
+
+echo "[agrirover] Project root detected at: $ROOT_DIR"
+cd "$ROOT_DIR"
+
+# Ensure Node and npm are available
+if ! command -v node >/dev/null 2>&1; then
+  echo "[agrirover] WARNING: node not found directly, checking /opt/render and /usr/local..."
+  for p in /opt/render/project/nodes/*/bin /usr/local/bin /usr/bin; do
+    if [ -x "$p/node" ]; then
+      export PATH="$p:$PATH"
+      break
+    fi
+  done
+fi
+
+# Ensure frontend is compiled
+if [ ! -f "$ROOT_DIR/frontend/dist/index.html" ]; then
+  echo "[agrirover] Compiling React frontend assets..."
+  cd "$ROOT_DIR/frontend"
+  npm install --no-audit --no-fund
+  npm run build
+  cd "$ROOT_DIR"
+fi
+
+# Ensure backend dependencies are installed
+if [ ! -d "$ROOT_DIR/backend/node_modules" ]; then
+  echo "[agrirover] Installing backend dependencies..."
+  cd "$ROOT_DIR/backend"
+  npm install --no-audit --no-fund
+  cd "$ROOT_DIR"
+fi
+
+cd "$ROOT_DIR/backend"
+echo "[agrirover] Starting AgriRover Full-Stack IoT Platform..."
 exec node server.js

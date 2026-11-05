@@ -203,6 +203,32 @@ def main():
     shutdown()
 
 
+def run_server():
+    """Entry point for agrirover CLI command."""
+    ensure_path()
+    node = find_node() or "node"
+    server_path = BACKEND_DIR / "server.js"
+    
+    # If frontend dist doesn't exist, build it
+    dist_index = FRONTEND_DIR / "dist" / "index.html"
+    if not dist_index.exists():
+        npm = find_npm() or "npm"
+        print(f"{CYAN}Building frontend assets...{RESET}")
+        subprocess.run([npm, "install"], cwd=FRONTEND_DIR)
+        subprocess.run([npm, "run", "build"], cwd=FRONTEND_DIR)
+        
+    # If backend node_modules doesn't exist, install it
+    backend_modules = BACKEND_DIR / "node_modules"
+    if not backend_modules.exists():
+        npm = find_npm() or "npm"
+        print(f"{CYAN}Installing backend packages...{RESET}")
+        subprocess.run([npm, "install"], cwd=BACKEND_DIR)
+
+    print(f"{GREEN}Starting AgriRover Server via {node}...{RESET}")
+    os.chdir(BACKEND_DIR)
+    os.execvp(node, [node, str(server_path)])
+
+
 if __name__ == "__main__":
     try:
         main()

@@ -15,6 +15,7 @@ __pycache__/
 frontend/dist/
 dist/
 build/
+*.egg-info/
 *.app/
 *.dmg
 
