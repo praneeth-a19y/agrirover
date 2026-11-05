@@ -76,7 +76,7 @@ const config = {
     brokerUrl,
     clientId: process.env.MQTT_CLIENT_ID || `agrirover-backend-${Math.random().toString(16).substring(2, 8)}`,
     username: process.env.MQTT_USERNAME || 'backend',
-    password: process.env.MQTT_PASSWORD || '',
+    password: process.env.MQTT_PASSWORD || 'Kavya@2030',
     caCert: caCert || null,
     keepalive: parseInt(process.env.MQTT_KEEPALIVE || '60', 10),
     reconnectPeriod: parseInt(process.env.MQTT_RECONNECT_PERIOD || '5000', 10),

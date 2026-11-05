@@ -23,7 +23,7 @@ try {
 const DEVICE_ID = process.argv[2] || process.env.DEVICE_ID || process.env.DEFAULT_DEVICE_ID || 'agrirover-01';
 const BROKER_URL = process.argv[3] || process.env.MQTT_BROKER_URL || 'mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883';
 const USERNAME = process.argv[4] || process.env.MQTT_ESP32_USERNAME || 'agrirover';
-const PASSWORD = process.argv[5] || process.env.MQTT_ESP32_PASSWORD || process.env.MQTT_PASSWORD || '';
+const PASSWORD = process.argv[5] || process.env.MQTT_ESP32_PASSWORD || process.env.MQTT_PASSWORD || 'Kavya@2030';
 
 const TOPIC_COMMAND   = `devices/${DEVICE_ID}/command`;
 const TOPIC_TELEMETRY = `devices/${DEVICE_ID}/telemetry`;
