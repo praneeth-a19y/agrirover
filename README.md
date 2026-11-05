@@ -25,7 +25,7 @@
 +-----------------------------------------+-----------------------------------------+
                                           |
                         (MQTTS TLS Port 8883 / TLS v1.3)
-                        Auth: agrirover_backend
+                        Auth: backend
                                           v
 +-----------------------------------------------------------------------------------+
 |                            EMQX CLOUD SERVERLESS BROKER                           |
@@ -37,7 +37,7 @@
 +-----------------------------------------+-----------------------------------------+
                                           ^
                         (MQTTS TLS Port 8883 / TLS v1.3)
-                        Auth: agrirover_esp32
+                        Auth: agrirover
                                           |
 +-----------------------------------------+-----------------------------------------+
 |                       ESP32 ROVER EMBEDDED HARDWARE                               |
@@ -90,7 +90,7 @@ When the repository was first connected to Render without configuration:
 3. Connect your GitHub repository: `praneeth-a19y/agrirover`.
 4. Render will parse `render.yaml` automatically.
 5. In the **Environment Variables** prompt, enter:
-   - `MQTT_PASSWORD`: *(Your EMQX Cloud password for `agrirover_backend`)*
+   - `MQTT_PASSWORD`: *(Your EMQX Cloud password for `backend`)*
 6. Click **Apply**. Render will build and deploy your live public website!
 
 ### Option 2: Manual Web Service Setup on Render
@@ -112,7 +112,7 @@ If creating a manual Web Service instead of using the Blueprint:
 | `MQTT_HOST` | `ed61a166.ala.eu-central-1.emqxsl.com` | EMQX Cloud Serverless broker host |
 | `MQTT_PORT` | `8883` | Secure MQTTS TLS port |
 | `MQTT_TLS` | `true` | Enforces TLS with certificate verification |
-| `MQTT_USERNAME` | `agrirover_backend` | Backend MQTT user |
+| `MQTT_USERNAME` | `backend` | Backend MQTT user |
 | `MQTT_PASSWORD` | `<your_backend_mqtt_password>` | Entered securely in Render settings |
 | `MQTT_CLIENT_ID`| `agrirover-backend` | Client ID identifier |
 | `DEVICE_ID` | `agrirover-01` | Default rover hardware identifier |
@@ -140,10 +140,10 @@ If creating a manual Web Service instead of using the Blueprint:
 
 ### Recommended Access Control (ACL) in EMQX Cloud Dashboard
 Under **EMQX Cloud Console** → **Authentication** & **Access Control**:
-1. **User `agrirover_backend`**:
+1. **User `backend`**:
    - **Publish Rule**: Allow `devices/+/command`, `devices/agrirover-01/command`
    - **Subscribe Rule**: Allow `devices/+/telemetry`, `devices/+/status`, `devices/+/ack`
-2. **User `agrirover_esp32`**:
+2. **User `agrirover`**:
    - **Subscribe Rule**: Allow `devices/agrirover-01/command`
    - **Publish Rule**: Allow `devices/agrirover-01/telemetry`, `devices/agrirover-01/status`, `devices/agrirover-01/ack`
 
@@ -187,7 +187,7 @@ If your physical rover is not powered or wired yet, test the full cloud loop wit
 
 ```bash
 # Syntax: node hardware/simulate_esp32_rover.js [deviceId] [brokerUrl] [username] [password]
-node hardware/simulate_esp32_rover.js agrirover-01 mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883 agrirover_esp32 <YOUR_PASSWORD>
+node hardware/simulate_esp32_rover.js agrirover-01 mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883 agrirover <YOUR_PASSWORD>
 ```
 
 1. The simulator performs a secure TLS handshake with EMQX Cloud.

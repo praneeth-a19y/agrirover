@@ -117,6 +117,8 @@ This document details the complete hardware architecture, pinout assignments, wi
    - `ArduinoJson` (v6 or v7)
    - `DHT sensor library` by Adafruit
    - `Adafruit Unified Sensor`
-5. Open `hardware/esp32_rover_firmware/esp32_rover_firmware.ino`.
-6. Update `WIFI_SSID`, `WIFI_PASSWORD`, and `SERVER_BASE_URL` with your laptop's local IP address (e.g. `http://192.168.1.100:8000/api/v1`).
-7. Select Board **"ESP32 Dev Module"**, connect via USB, and click **Upload**.
+5. Copy `hardware/esp32_rover_firmware/secrets.h.example` to `secrets.h` in the same directory.
+6. In `secrets.h`, enter your Wi-Fi SSID, Wi-Fi Password, and ESP32 EMQX Cloud password (MQTT username is already configured as `agrirover`, port `8883` TLS).
+7. Open `hardware/esp32_rover_firmware/esp32_rover_firmware.ino` in Arduino IDE.
+8. Select Board **"ESP32 Dev Module"**, connect via USB, and click **Upload**.
+9. Open the Serial Monitor at **115200 baud** to view Wi-Fi connection, DigiCert TLS validation, and EMQX telemetry loop.

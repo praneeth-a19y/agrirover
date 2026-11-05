@@ -7,7 +7,7 @@
  * Usage:
  *   node hardware/simulate_esp32_rover.js [deviceId] [brokerUrl] [username] [password]
  * Example:
- *   node hardware/simulate_esp32_rover.js agrirover-01 mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883 agrirover_esp32 <password>
+ *   node hardware/simulate_esp32_rover.js agrirover-01 mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883 agrirover <password>
  * ============================================================================
  */
 
@@ -22,7 +22,7 @@ try {
 
 const DEVICE_ID = process.argv[2] || process.env.DEVICE_ID || process.env.DEFAULT_DEVICE_ID || 'agrirover-01';
 const BROKER_URL = process.argv[3] || process.env.MQTT_BROKER_URL || 'mqtts://ed61a166.ala.eu-central-1.emqxsl.com:8883';
-const USERNAME = process.argv[4] || process.env.MQTT_ESP32_USERNAME || 'agrirover_esp32';
+const USERNAME = process.argv[4] || process.env.MQTT_ESP32_USERNAME || 'agrirover';
 const PASSWORD = process.argv[5] || process.env.MQTT_ESP32_PASSWORD || process.env.MQTT_PASSWORD || '';
 
 const TOPIC_COMMAND   = `devices/${DEVICE_ID}/command`;
@@ -60,6 +60,7 @@ const clientOptions = {
 
 if (BROKER_URL.startsWith('mqtts://') || BROKER_URL.includes(':8883')) {
   clientOptions.rejectUnauthorized = true;
+  clientOptions.servername = 'ed61a166.ala.eu-central-1.emqxsl.com';
   const caFile = path.resolve(__dirname, '../backend/certs/emqx-ca.pem');
   if (fs.existsSync(caFile)) {
     clientOptions.ca = [fs.readFileSync(caFile, 'utf8')];

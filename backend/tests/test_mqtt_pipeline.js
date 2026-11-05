@@ -31,12 +31,13 @@ async function runTests() {
   };
   if (config.mqtt.tls || config.mqtt.brokerUrl.startsWith('mqtts://')) {
     espOptions.rejectUnauthorized = true;
+    espOptions.servername = config.mqtt.host;
     if (config.mqtt.caCert) {
       espOptions.ca = [config.mqtt.caCert];
     }
   }
   if (config.mqtt.username) {
-    espOptions.username = process.env.MQTT_ESP32_USERNAME || 'agrirover_esp32';
+    espOptions.username = process.env.MQTT_ESP32_USERNAME || 'agrirover';
     espOptions.password = process.env.MQTT_ESP32_PASSWORD || config.mqtt.password;
   }
 

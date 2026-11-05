@@ -77,6 +77,9 @@ function initMQTT() {
 
     mqttClient.on('error', (err) => {
       logger.error('MQTT', `Client error: ${err.message}`);
+      if (err.message && (err.message.includes('Not authorized') || err.message.includes('connack 4') || err.message.includes('connack 5'))) {
+        logger.error('MQTT', 'Authentication rejected: Verify MQTT_USERNAME="backend" and valid MQTT_PASSWORD in Render/environment variables.');
+      }
     });
 
     mqttClient.on('reconnect', () => {
@@ -229,6 +232,6 @@ function publishCommand(deviceId, commandRecord) {
 module.exports = {
   initMQTT,
   publishCommand,
-  isMqttConnected: () => isConnected,
+  isMqttConnected: () => Boolean(isConnected && mqttClient && mqttClient.connected),
   getClient: () => mqttClient,
 };

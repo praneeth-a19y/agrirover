@@ -24,7 +24,7 @@ services:
       - key: MQTT_TLS
         value: "true"
       - key: MQTT_USERNAME
-        value: agrirover_backend
+        value: backend
       - key: MQTT_PASSWORD
         sync: false # Set securely in Render dashboard
       - key: MQTT_CLIENT_ID
