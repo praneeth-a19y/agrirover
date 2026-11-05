@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Locate project root and start backend server
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$SCRIPT_DIR/backend" ]; then
+  cd "$SCRIPT_DIR/backend"
+elif [ -d "$SCRIPT_DIR/../backend" ]; then
+  cd "$SCRIPT_DIR/../backend"
+elif [ -d "$SCRIPT_DIR/../../backend" ]; then
+  cd "$SCRIPT_DIR/../../backend"
+elif [ -d "./backend" ]; then
+  cd "./backend"
+fi
+exec node server.js
