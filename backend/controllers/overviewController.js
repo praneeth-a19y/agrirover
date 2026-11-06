@@ -12,11 +12,11 @@ function getOverview(req, res, next) {
     const roverStatus = roverService.getRoverStatus();
     const latestTelemetry = telemetryService.getLatestTelemetry();
 
-    const totalScans = db.prepare('SELECT COUNT(*) as count FROM disease_scans').get().count;
-    const healthyScans = db.prepare('SELECT COUNT(*) as count FROM disease_scans WHERE is_healthy = 1').get().count;
+    const totalScans = db.prepare('SELECT COUNT(*) as count FROM disease_scans WHERE is_demo = 0').get().count;
+    const healthyScans = db.prepare('SELECT COUNT(*) as count FROM disease_scans WHERE is_healthy = 1 AND is_demo = 0').get().count;
     const diseasedScans = totalScans - healthyScans;
 
-    const latestScan = db.prepare('SELECT * FROM disease_scans ORDER BY timestamp DESC LIMIT 1').get() || null;
+    const latestScan = db.prepare('SELECT * FROM disease_scans WHERE is_demo = 0 ORDER BY timestamp DESC LIMIT 1').get() || null;
     const recentAlerts = alertService.getAlerts({ limit: 10 });
     const activeAlertsCount = db.prepare('SELECT COUNT(*) as count FROM alerts WHERE acknowledged = 0').get().count;
 

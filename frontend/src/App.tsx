@@ -18,7 +18,7 @@ import { socketService } from './services/socketService';
 export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageId>('overview');
   const [overviewData, setOverviewData] = useState<OverviewSummary | null>(null);
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
   const [isCalibrationOpen, setIsCalibrationOpen] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);

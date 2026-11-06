@@ -12,9 +12,26 @@ function getLatest(req, res, next) {
 
 function getHistory(req, res, next) {
   try {
-    const { plot_id, limit = 50 } = req.query;
-    const data = telemetryService.getTelemetryHistory(plot_id, limit);
+    const { plot_id, limit = 50, range = 'day' } = req.query;
+    const data = telemetryService.getTelemetryHistory({
+      plotId: plot_id,
+      limit,
+      range,
+    });
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+function getStats(req, res, next) {
+  try {
+    const { plot_id, range = 'day' } = req.query;
+    const stats = telemetryService.getTelemetryStats({
+      plotId: plot_id,
+      range,
+    });
+    res.json(stats);
   } catch (err) {
     next(err);
   }
@@ -32,5 +49,6 @@ function ingest(req, res, next) {
 module.exports = {
   getLatest,
   getHistory,
+  getStats,
   ingest,
 };

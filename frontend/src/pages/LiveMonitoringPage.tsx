@@ -2,16 +2,19 @@ import React, { useState, useEffect } from 'react';
 import {
   Thermometer,
   Droplets,
-  Gauge,
-  Sliders,
+  Calendar,
   RefreshCw,
   AlertTriangle,
-  CheckCircle2,
   Clock,
   Radio,
-  HelpCircle
+  CheckCircle2,
+  WifiOff,
+  Activity,
+  TrendingUp,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, AreaChart, Area } from 'recharts';
 import { Telemetry, AlertConfig } from '../types';
 import { api } from '../services/api';
 import { socketService } from '../services/socketService';
@@ -25,498 +28,398 @@ interface LiveMonitoringPageProps {
 
 export const LiveMonitoringPage: React.FC<LiveMonitoringPageProps> = ({
   latestTelemetry,
-  isDemoMode,
-  onOpenCalibration,
   onRefresh,
 }) => {
   const [history, setHistory] = useState<Telemetry[]>([]);
-  const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
-  const [isEditingThresholds, setIsEditingThresholds] = useState(false);
-  const [tempMin, setTempMin] = useState(12);
-  const [tempMax, setTempMax] = useState(38);
-  const [moistMin, setMoistMin] = useState(30);
-  const [moistMax, setMoistMax] = useState(80);
-  const [phMin, setPhMin] = useState(6.0);
-  const [phMax, setPhMax] = useState(7.5);
-  const [autoPoll, setAutoPoll] = useState(true);
+  const [selectedRange, setSelectedRange] = useState<'day' | 'week' | 'month'>('day');
+  const [stats, setStats] = useState<{
+    temperature: { min: number | null; max: number | null; avg: number | null };
+    humidity: { min: number | null; max: number | null; avg: number | null };
+    count: number;
+  }>({
+    temperature: { min: null, max: null, avg: null },
+    humidity: { min: null, max: null, avg: null },
+    count: 0,
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
 
   useEffect(() => {
-    loadHistory();
-    loadConfig();
+    loadData();
 
-    // Instant real-time telemetry updates via Socket.IO
+    // Instant real-time telemetry updates via Socket.IO from MQTT pipeline
     const unsub = socketService.onTelemetry((telemetry) => {
-      setHistory((prev) => [...prev.slice(-19), telemetry]);
-      onRefresh();
+      if (telemetry && !telemetry.is_simulated) {
+        setHistory((prev) => [...prev.slice(-39), telemetry]);
+        setLastUpdateTime(new Date());
+        onRefresh();
+      }
     });
 
     return () => {
       unsub();
     };
-  }, []);
+  }, [selectedRange]);
 
-  useEffect(() => {
-    let interval: any = null;
-    if (autoPoll) {
-      interval = setInterval(() => {
-        loadHistory();
-        onRefresh();
-      }, 5000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [autoPoll]);
-
-  const loadHistory = async () => {
+  const loadData = async () => {
+    setIsLoading(true);
     try {
-      const data = await api.getTelemetryHistory(undefined, 20);
-      setHistory(data.reverse()); // chronological order
+      const [histData, statsData] = await Promise.all([
+        api.getTelemetryHistory(undefined, 50, selectedRange),
+        api.getTelemetryStats(undefined, selectedRange),
+      ]);
+      setHistory(histData.reverse()); // Chronological order
+      setStats(statsData);
+      if (histData.length > 0) {
+        setLastUpdateTime(new Date(histData[histData.length - 1].timestamp));
+      }
     } catch (err) {
-      console.error('Error fetching telemetry history:', err);
+      console.error('Error fetching live telemetry data:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const loadConfig = async () => {
-    try {
-      const cfg = await api.getAlertConfig();
-      setAlertConfig(cfg);
-      setTempMin(cfg.temp_min);
-      setTempMax(cfg.temp_max);
-      setMoistMin(cfg.moisture_min);
-      setMoistMax(cfg.moisture_max);
-      setPhMin(cfg.ph_min);
-      setPhMax(cfg.ph_max);
-    } catch (err) {
-      console.error('Error fetching alert config:', err);
-    }
-  };
+  // Format real chart data points
+  const chartData = history
+    .filter((t) => t.temperature_c !== null || t.humidity_percent !== null)
+    .map((t) => ({
+      time: new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      date: new Date(t.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+      temperature: t.temperature_c !== null ? Number(t.temperature_c.toFixed(1)) : null,
+      humidity: t.humidity_percent !== null ? Number(t.humidity_percent.toFixed(1)) : null,
+    }));
 
-  const handleSaveThresholds = async () => {
-    if (!alertConfig) return;
-    try {
-      const updated: AlertConfig = {
-        ...alertConfig,
-        temp_min: Number(tempMin),
-        temp_max: Number(tempMax),
-        moisture_min: Number(moistMin),
-        moisture_max: Number(moistMax),
-        ph_min: Number(phMin),
-        ph_max: Number(phMax),
-      };
-      await api.updateAlertConfig(updated);
-      setAlertConfig(updated);
-      setIsEditingThresholds(false);
-    } catch (err) {
-      alert('Failed to update alert thresholds: ' + (err as Error).message);
-    }
-  };
-
-  // Helper to determine reading status (Measured, Simulated, Stale, Unavailable)
-  const getStatusBadge = (value: number | null | undefined, isSimulated: boolean) => {
-    if (value === null || value === undefined) {
-      return (
-        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-red-950/60 text-red-400 border border-red-500/30">
-          UNAVAILABLE
-        </span>
-      );
-    }
-    if (isSimulated || isDemoMode) {
-      return (
-        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-500/30">
-          SIMULATED
-        </span>
-      );
-    }
-    return (
-      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-500/30">
-        MEASURED LIVE
-      </span>
-    );
-  };
-
-  const chartData = history.map((h) => ({
-    time: h.timestamp ? new Date(h.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-    temperature: h.temperature_c,
-    humidity: h.humidity_percent,
-    moisture: h.soil_moisture_percent,
-    ph: h.soil_ph,
-  }));
-
-  const lastUpdated = latestTelemetry?.timestamp
-    ? new Date(latestTelemetry.timestamp).toLocaleTimeString()
-    : 'Waiting for stream...';
+  const hasData = latestTelemetry && (latestTelemetry.temperature_c !== null || latestTelemetry.humidity_percent !== null);
 
   return (
     <div className="space-y-6">
-      {/* Top Header & Actions Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-agri-darkest border border-agri-border">
+      {/* Top Banner */}
+      <div className="p-4 rounded-2xl bg-agri-darkest border border-agri-border flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-agri-offwhite flex items-center gap-2">
-            <Radio className="w-5 h-5 text-agri-lime" />
-            <span>Environmental Telemetry Ingestion</span>
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-agri-lime animate-pulse" />
+            <span className="text-xs font-mono uppercase tracking-wider text-agri-lime font-bold">
+              Physical Hardware Live Telemetry
+            </span>
+          </div>
+          <h2 className="text-xl font-bold text-agri-offwhite tracking-tight mt-1">
+            DHT22 Temperature & Humidity Environmental Monitoring
           </h2>
-          <p className="text-xs text-agri-muted flex items-center gap-1.5 mt-0.5">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Last Packet: {lastUpdated}</span>
+          <p className="text-xs text-agri-muted">
+            Direct real-time readings received from ESP32 GPIO 4 over EMQX Cloud MQTT TLS and Render backend.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Auto Poll Switch */}
-          <button
-            onClick={() => setAutoPoll(!autoPoll)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-medium transition-all ${
-              autoPoll
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                : 'bg-agri-card text-agri-muted border-agri-border'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${autoPoll ? 'bg-emerald-400 animate-pulse' : 'bg-agri-muted'}`} />
-            <span>{autoPoll ? '5s Polling Active' : 'Polling Paused'}</span>
-          </button>
+        {/* Range Selector & Manual Refresh */}
+        <div className="flex items-center gap-2">
+          {/* Daily, Weekly, Monthly Filter */}
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-agri-card border border-agri-border text-xs font-medium">
+            <button
+              onClick={() => setSelectedRange('day')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                selectedRange === 'day'
+                  ? 'bg-agri-lime text-agri-darkest font-bold shadow-sm'
+                  : 'text-agri-muted hover:text-white'
+              }`}
+            >
+              Daily (24h)
+            </button>
+            <button
+              onClick={() => setSelectedRange('week')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                selectedRange === 'week'
+                  ? 'bg-agri-lime text-agri-darkest font-bold shadow-sm'
+                  : 'text-agri-muted hover:text-white'
+              }`}
+            >
+              Weekly (7d)
+            </button>
+            <button
+              onClick={() => setSelectedRange('month')}
+              className={`px-3 py-1.5 rounded-lg transition-all ${
+                selectedRange === 'month'
+                  ? 'bg-agri-lime text-agri-darkest font-bold shadow-sm'
+                  : 'text-agri-muted hover:text-white'
+              }`}
+            >
+              Monthly (30d)
+            </button>
+          </div>
 
           <button
-            onClick={onOpenCalibration}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-agri-card hover:bg-agri-cardHover border border-agri-border text-agri-lime text-xs font-semibold transition-all"
+            onClick={loadData}
+            disabled={isLoading}
+            className="p-2 rounded-xl bg-agri-card border border-agri-border text-agri-muted hover:text-agri-offwhite hover:border-agri-lime transition-all disabled:opacity-50"
+            title="Refresh database records"
           >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>Calibration Wizard</span>
-          </button>
-
-          <button
-            onClick={() => setIsEditingThresholds(!isEditingThresholds)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-agri-card hover:bg-agri-cardHover border border-agri-border text-agri-offwhite text-xs font-medium transition-all"
-          >
-            <span>Thresholds</span>
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-agri-lime' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* Threshold Config Drawer if toggled */}
-      {isEditingThresholds && (
-        <div className="p-5 rounded-2xl bg-agri-dark/90 border border-agri-border space-y-4 shadow-xl">
-          <div className="flex items-center justify-between border-b border-agri-border/60 pb-3">
-            <h3 className="text-sm font-bold text-agri-offwhite">Configure Agricultural Alert Thresholds</h3>
-            <span className="text-xs text-agri-muted">Custom triggers for soil and ambient alerts</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-            <div className="space-y-1">
-              <label className="text-agri-muted">Soil Moisture Range (%):</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={moistMin}
-                  onChange={(e) => setMoistMin(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-agri-darkest border border-agri-border font-mono text-agri-offwhite"
-                  placeholder="Min"
-                />
-                <span className="text-agri-muted">to</span>
-                <input
-                  type="number"
-                  value={moistMax}
-                  onChange={(e) => setMoistMax(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-agri-darkest border border-agri-border font-mono text-agri-offwhite"
-                  placeholder="Max"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-agri-muted">Soil pH Range:</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.1"
-                  value={phMin}
-                  onChange={(e) => setPhMin(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-agri-darkest border border-agri-border font-mono text-agri-offwhite"
-                  placeholder="Min"
-                />
-                <span className="text-agri-muted">to</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={phMax}
-                  onChange={(e) => setPhMax(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-agri-darkest border border-agri-border font-mono text-agri-offwhite"
-                  placeholder="Max"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-agri-muted">Canopy Temp (°C):</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={tempMin}
-                  onChange={(e) => setTempMin(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-agri-darkest border border-agri-border font-mono text-agri-offwhite"
-                  placeholder="Min"
-                />
-                <span className="text-agri-muted">to</span>
-                <input
-                  type="number"
-                  value={tempMax}
-                  onChange={(e) => setTempMax(Number(e.target.value))}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-agri-darkest border border-agri-border font-mono text-agri-offwhite"
-                  placeholder="Max"
-                />
-              </div>
+      {/* Disconnected / Waiting for Sensor Notice if no real data */}
+      {!hasData && (
+        <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <WifiOff className="w-5 h-5 text-amber-400 flex-shrink-0" />
+            <div>
+              <span className="font-bold text-amber-300 block">Waiting for hardware sensor telemetry...</span>
+              <span className="text-amber-200/80">
+                Flash your Main ESP32 with the provided firmware. When powered on and connected to Wi-Fi, DHT22 readings will automatically stream into this dashboard.
+              </span>
             </div>
           </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              onClick={() => setIsEditingThresholds(false)}
-              className="px-3 py-1.5 rounded-xl text-xs text-agri-muted hover:text-agri-offwhite"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSaveThresholds}
-              className="px-4 py-1.5 rounded-xl bg-agri-lime text-agri-darkest font-semibold text-xs shadow-md shadow-agri-lime/20"
-            >
-              Save Thresholds
-            </button>
-          </div>
+          <span className="px-2.5 py-1 rounded bg-black/40 font-mono text-amber-300 font-bold border border-amber-500/30 whitespace-nowrap">
+            MQTT TOPIC: rover/sensors/data
+          </span>
         </div>
       )}
 
-      {/* 4 Primary Hardware Sensor Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Sensor 1: Soil Moisture */}
-        <div className="agri-card p-5 rounded-2xl space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                <Droplets className="w-5 h-5" />
+      {/* TWO PRIMARY HARDWARE SENSOR CARDS ONLY */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* CARD 1: TEMPERATURE (°C) */}
+        <div className="agri-card p-6 rounded-2xl space-y-5 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between border-b border-agri-border/40 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <Thermometer className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-agri-offwhite">Ambient Temperature</h3>
+                  <p className="text-xs text-agri-muted">DHT22 Digital Temperature Sensor (GPIO 4)</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-agri-offwhite">Soil Moisture</h3>
-                <p className="text-xs text-agri-muted">Capacitive Sensor (ESP32 ADC Pin 34)</p>
-              </div>
-            </div>
-            {getStatusBadge(latestTelemetry?.soil_moisture_percent, latestTelemetry?.is_simulated || false)}
-          </div>
 
-          <div className="flex items-baseline justify-between pt-1">
-            <div className="text-3xl font-extrabold font-mono text-agri-offwhite">
-              {latestTelemetry?.soil_moisture_percent !== null && latestTelemetry?.soil_moisture_percent !== undefined
-                ? `${latestTelemetry.soil_moisture_percent.toFixed(1)}%`
-                : 'Unavailable'}
-            </div>
-            <div className="text-right text-xs font-mono text-agri-muted">
-              <div>Raw ADC: <span className="text-agri-lime">{latestTelemetry?.raw_moisture_adc ?? 2300}</span> / 4095</div>
-              <div className="text-[10px]">Two-point calibrated</div>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-agri-muted">
-              <span>Threshold Limits</span>
-              <span className="font-mono text-agri-offwhite">{moistMin}% - {moistMax}%</span>
-            </div>
-            <div className="w-full bg-agri-darkest rounded-full h-2 overflow-hidden border border-agri-border/60">
-              <div
-                className={`h-full transition-all duration-500 ${
-                  (latestTelemetry?.soil_moisture_percent ?? 50) < moistMin
-                    ? 'bg-amber-500'
-                    : (latestTelemetry?.soil_moisture_percent ?? 50) > moistMax
-                    ? 'bg-blue-400'
-                    : 'bg-emerald-500'
+              <span
+                className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full border ${
+                  latestTelemetry?.temperature_c !== null && latestTelemetry?.temperature_c !== undefined
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-agri-card text-agri-muted border-agri-border'
                 }`}
-                style={{ width: `${Math.min(100, Math.max(0, latestTelemetry?.soil_moisture_percent ?? 0))}%` }}
-              />
+              >
+                {latestTelemetry?.temperature_c !== null && latestTelemetry?.temperature_c !== undefined
+                  ? 'LIVE HARDWARE'
+                  : 'WAITING FOR DATA'}
+              </span>
+            </div>
+
+            {/* Current Reading Hero */}
+            <div className="flex items-baseline justify-between pt-1">
+              <div>
+                <span className="text-xs uppercase font-mono text-agri-muted tracking-wider block">Current Reading</span>
+                <div className="text-4xl font-extrabold font-mono text-agri-offwhite mt-1">
+                  {latestTelemetry?.temperature_c !== null && latestTelemetry?.temperature_c !== undefined
+                    ? `${latestTelemetry.temperature_c.toFixed(1)}°C`
+                    : '-- °C'}
+                </div>
+              </div>
+
+              <div className="text-right text-xs font-mono text-agri-muted">
+                <div>Sensor Status: <span className="text-agri-lime font-bold">1-Wire Digital</span></div>
+                <div className="text-[10px] text-agri-muted">Resolution: 0.1°C</div>
+              </div>
+            </div>
+
+            {/* Summary Statistics Pills (Min, Max, Avg) */}
+            <div className="grid grid-cols-3 gap-2.5 pt-2">
+              <div className="p-3 rounded-xl bg-agri-darkest/80 border border-agri-border/60 text-center">
+                <span className="text-[10px] text-agri-muted uppercase font-mono block">Minimum</span>
+                <span className="text-sm font-bold font-mono text-blue-400">
+                  {stats.temperature.min !== null ? `${stats.temperature.min}°C` : '--'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-agri-darkest/80 border border-agri-border/60 text-center">
+                <span className="text-[10px] text-agri-muted uppercase font-mono block">Average</span>
+                <span className="text-sm font-bold font-mono text-amber-300">
+                  {stats.temperature.avg !== null ? `${stats.temperature.avg}°C` : '--'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-agri-darkest/80 border border-agri-border/60 text-center">
+                <span className="text-[10px] text-agri-muted uppercase font-mono block">Maximum</span>
+                <span className="text-sm font-bold font-mono text-red-400">
+                  {stats.temperature.max !== null ? `${stats.temperature.max}°C` : '--'}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Mini Chart */}
-          <div className="h-28 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <XAxis dataKey="time" stroke="#8E9E94" fontSize={9} tickLine={false} />
-                <YAxis stroke="#8E9E94" fontSize={9} domain={[0, 100]} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '8px', fontSize: '11px' }}
-                />
-                <Line type="monotone" dataKey="moisture" stroke="#3B82F6" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+          {/* Historical Temperature Chart */}
+          <div className="space-y-2 pt-3 border-t border-agri-border/40">
+            <div className="flex items-center justify-between text-xs text-agri-muted">
+              <span className="font-semibold text-agri-offwhite flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+                <span>Historical Temperature Progression ({selectedRange.toUpperCase()})</span>
+              </span>
+              <span className="font-mono text-[10px] text-agri-muted">
+                {chartData.length} Readings Logged
+              </span>
+            </div>
+
+            <div className="h-44 w-full">
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="tempGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#F59E0B" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="time" stroke="#8E9E94" fontSize={10} tickLine={false} />
+                    <YAxis stroke="#8E9E94" fontSize={10} domain={['auto', 'auto']} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#0F291E',
+                        border: '1px solid #275E47',
+                        borderRadius: '10px',
+                        fontSize: '11px',
+                        color: '#fff',
+                      }}
+                    />
+                    <Area type="monotone" dataKey="temperature" stroke="#F59E0B" strokeWidth={2.5} fill="url(#tempGradient)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center border border-dashed border-agri-border/60 rounded-xl bg-agri-darkest/40 text-xs text-agri-muted">
+                  No historical temperature readings recorded in this time range.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Sensor 2: Soil pH */}
-        <div className="agri-card p-5 rounded-2xl space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                <Gauge className="w-5 h-5" />
+        {/* CARD 2: HUMIDITY (%) */}
+        <div className="agri-card p-6 rounded-2xl space-y-5 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between border-b border-agri-border/40 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <Droplets className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-agri-offwhite">Relative Humidity</h3>
+                  <p className="text-xs text-agri-muted">DHT22 Digital Humidity Sensor (GPIO 4)</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-agri-offwhite">Soil pH Chemistry</h3>
-                <p className="text-xs text-agri-muted">Analog Glass Electrode Probe (Pin 35)</p>
-              </div>
-            </div>
-            {getStatusBadge(latestTelemetry?.soil_ph, latestTelemetry?.is_simulated || false)}
-          </div>
 
-          <div className="flex items-baseline justify-between pt-1">
-            <div className="text-3xl font-extrabold font-mono text-agri-offwhite">
-              {latestTelemetry?.soil_ph !== null && latestTelemetry?.soil_ph !== undefined
-                ? `${latestTelemetry.soil_ph.toFixed(2)} pH`
-                : 'Unavailable'}
-            </div>
-            <div className="text-right text-xs font-mono text-agri-muted">
-              <div>Output: <span className="text-agri-lime">{latestTelemetry?.raw_ph_voltage?.toFixed(2) ?? '2.50'} V</span></div>
-              <div className="text-[10px]">Buffer 4.01/7.00 Reference</div>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-agri-muted">
-              <span>Target Agronomic Band</span>
-              <span className="font-mono text-agri-offwhite">{phMin} - {phMax} pH</span>
-            </div>
-            <div className="w-full bg-agri-darkest rounded-full h-2 overflow-hidden border border-agri-border/60">
-              <div
-                className={`h-full transition-all duration-500 ${
-                  (latestTelemetry?.soil_ph ?? 7) < phMin || (latestTelemetry?.soil_ph ?? 7) > phMax
-                    ? 'bg-amber-500'
-                    : 'bg-purple-500'
+              <span
+                className={`text-xs font-mono font-bold px-2.5 py-1 rounded-full border ${
+                  latestTelemetry?.humidity_percent !== null && latestTelemetry?.humidity_percent !== undefined
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-agri-card text-agri-muted border-agri-border'
                 }`}
-                style={{ width: `${Math.min(100, Math.max(0, ((latestTelemetry?.soil_ph ?? 7) / 14) * 100))}%` }}
-              />
+              >
+                {latestTelemetry?.humidity_percent !== null && latestTelemetry?.humidity_percent !== undefined
+                  ? 'LIVE HARDWARE'
+                  : 'WAITING FOR DATA'}
+              </span>
+            </div>
+
+            {/* Current Reading Hero */}
+            <div className="flex items-baseline justify-between pt-1">
+              <div>
+                <span className="text-xs uppercase font-mono text-agri-muted tracking-wider block">Current Reading</span>
+                <div className="text-4xl font-extrabold font-mono text-agri-offwhite mt-1">
+                  {latestTelemetry?.humidity_percent !== null && latestTelemetry?.humidity_percent !== undefined
+                    ? `${latestTelemetry.humidity_percent.toFixed(1)}%`
+                    : '-- %'}
+                </div>
+              </div>
+
+              <div className="text-right text-xs font-mono text-agri-muted">
+                <div>Sensor Status: <span className="text-agri-lime font-bold">1-Wire Digital</span></div>
+                <div className="text-[10px] text-agri-muted">Range: 0% – 100% RH</div>
+              </div>
+            </div>
+
+            {/* Summary Statistics Pills (Min, Max, Avg) */}
+            <div className="grid grid-cols-3 gap-2.5 pt-2">
+              <div className="p-3 rounded-xl bg-agri-darkest/80 border border-agri-border/60 text-center">
+                <span className="text-[10px] text-agri-muted uppercase font-mono block">Minimum</span>
+                <span className="text-sm font-bold font-mono text-blue-400">
+                  {stats.humidity.min !== null ? `${stats.humidity.min}%` : '--'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-agri-darkest/80 border border-agri-border/60 text-center">
+                <span className="text-[10px] text-agri-muted uppercase font-mono block">Average</span>
+                <span className="text-sm font-bold font-mono text-emerald-300">
+                  {stats.humidity.avg !== null ? `${stats.humidity.avg}%` : '--'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-agri-darkest/80 border border-agri-border/60 text-center">
+                <span className="text-[10px] text-agri-muted uppercase font-mono block">Maximum</span>
+                <span className="text-sm font-bold font-mono text-cyan-400">
+                  {stats.humidity.max !== null ? `${stats.humidity.max}%` : '--'}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Mini Chart */}
-          <div className="h-28 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <XAxis dataKey="time" stroke="#8E9E94" fontSize={9} tickLine={false} />
-                <YAxis stroke="#8E9E94" fontSize={9} domain={[4, 10]} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '8px', fontSize: '11px' }}
-                />
-                <Line type="monotone" dataKey="ph" stroke="#A855F7" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+          {/* Historical Humidity Chart */}
+          <div className="space-y-2 pt-3 border-t border-agri-border/40">
+            <div className="flex items-center justify-between text-xs text-agri-muted">
+              <span className="font-semibold text-agri-offwhite flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Historical Humidity Progression ({selectedRange.toUpperCase()})</span>
+              </span>
+              <span className="font-mono text-[10px] text-agri-muted">
+                {chartData.length} Readings Logged
+              </span>
+            </div>
+
+            <div className="h-44 w-full">
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="humGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="time" stroke="#8E9E94" fontSize={10} tickLine={false} />
+                    <YAxis stroke="#8E9E94" fontSize={10} domain={[0, 100]} tickLine={false} />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#0F291E',
+                        border: '1px solid #275E47',
+                        borderRadius: '10px',
+                        fontSize: '11px',
+                        color: '#fff',
+                      }}
+                    />
+                    <Area type="monotone" dataKey="humidity" stroke="#10B981" strokeWidth={2.5} fill="url(#humGradient)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center border border-dashed border-agri-border/60 rounded-xl bg-agri-darkest/40 text-xs text-agri-muted">
+                  No historical humidity readings recorded in this time range.
+                </div>
+              )}
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Sensor 3: Ambient Temperature */}
-        <div className="agri-card p-5 rounded-2xl space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                <Thermometer className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-agri-offwhite">Air / Canopy Temperature</h3>
-                <p className="text-xs text-agri-muted">DHT22 Digital Humidity & Temp (Pin 4)</p>
-              </div>
-            </div>
-            {getStatusBadge(latestTelemetry?.temperature_c, latestTelemetry?.is_simulated || false)}
-          </div>
-
-          <div className="flex items-baseline justify-between pt-1">
-            <div className="text-3xl font-extrabold font-mono text-agri-offwhite">
-              {latestTelemetry?.temperature_c !== null && latestTelemetry?.temperature_c !== undefined
-                ? `${latestTelemetry.temperature_c.toFixed(1)}°C`
-                : 'Unavailable'}
-            </div>
-            <div className="text-right text-xs font-mono text-agri-muted">
-              <div>Comfort: <span className="text-agri-lime">Normal</span></div>
-              <div className="text-[10px]">Threshold: {tempMax}°C max</div>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-agri-muted">
-              <span>Heat Stress Range</span>
-              <span className="font-mono text-agri-offwhite">{tempMin}°C - {tempMax}°C</span>
-            </div>
-            <div className="w-full bg-agri-darkest rounded-full h-2 overflow-hidden border border-agri-border/60">
-              <div
-                className={`h-full transition-all duration-500 ${
-                  (latestTelemetry?.temperature_c ?? 25) > tempMax ? 'bg-red-500' : 'bg-amber-400'
-                }`}
-                style={{ width: `${Math.min(100, Math.max(0, ((latestTelemetry?.temperature_c ?? 25) / 50) * 100))}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Mini Chart */}
-          <div className="h-28 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <XAxis dataKey="time" stroke="#8E9E94" fontSize={9} tickLine={false} />
-                <YAxis stroke="#8E9E94" fontSize={9} domain={[10, 45]} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '8px', fontSize: '11px' }}
-                />
-                <Line type="monotone" dataKey="temperature" stroke="#F59E0B" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+      {/* Hardware Telemetry Pipeline Status Banner */}
+      <div className="p-4 rounded-xl bg-agri-card/20 border border-agri-border/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono">
+        <div className="flex items-center gap-2 text-agri-muted">
+          <Clock className="w-4 h-4 text-agri-lime" />
+          <span>Last Database Record:</span>
+          <span className="text-agri-offwhite font-bold">
+            {lastUpdateTime ? lastUpdateTime.toLocaleString() : 'No hardware record received yet'}
+          </span>
         </div>
-
-        {/* Sensor 4: Relative Humidity */}
-        <div className="agri-card p-5 rounded-2xl space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                <Droplets className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-agri-offwhite">Relative Humidity</h3>
-                <p className="text-xs text-agri-muted">DHT22 Digital Sensor (Pin 4)</p>
-              </div>
-            </div>
-            {getStatusBadge(latestTelemetry?.humidity_percent, latestTelemetry?.is_simulated || false)}
-          </div>
-
-          <div className="flex items-baseline justify-between pt-1">
-            <div className="text-3xl font-extrabold font-mono text-agri-offwhite">
-              {latestTelemetry?.humidity_percent !== null && latestTelemetry?.humidity_percent !== undefined
-                ? `${latestTelemetry.humidity_percent.toFixed(1)}% RH`
-                : 'Unavailable'}
-            </div>
-            <div className="text-right text-xs font-mono text-agri-muted">
-              <div>Vapor Deficit: <span className="text-agri-lime">Optimum</span></div>
-              <div className="text-[10px]">Dew Point: ~19°C</div>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs text-agri-muted">
-              <span>Optimal Foliar Transpiration</span>
-              <span className="font-mono text-agri-offwhite">40% - 85% RH</span>
-            </div>
-            <div className="w-full bg-agri-darkest rounded-full h-2 overflow-hidden border border-agri-border/60">
-              <div
-                className="h-full bg-emerald-500 transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(0, latestTelemetry?.humidity_percent ?? 50))}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Mini Chart */}
-          <div className="h-28 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <XAxis dataKey="time" stroke="#8E9E94" fontSize={9} tickLine={false} />
-                <YAxis stroke="#8E9E94" fontSize={9} domain={[20, 100]} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '8px', fontSize: '11px' }}
-                />
-                <Line type="monotone" dataKey="humidity" stroke="#10B981" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          <span className="text-emerald-400 font-bold">SOCKET.IO & MQTT AUTO-SYNC ACTIVE</span>
         </div>
       </div>
     </div>

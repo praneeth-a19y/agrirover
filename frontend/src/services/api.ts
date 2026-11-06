@@ -49,8 +49,15 @@ export const api = {
   // Telemetry
   getLatestTelemetry: (plotId?: string) =>
     request<Telemetry | null>(`/telemetry/latest${plotId ? `?plot_id=${plotId}` : ''}`),
-  getTelemetryHistory: (plotId?: string, limit: number = 50) =>
-    request<Telemetry[]>(`/telemetry/history?limit=${limit}${plotId ? `&plot_id=${plotId}` : ''}`),
+  getTelemetryHistory: (plotId?: string, limit: number = 50, range: string = 'day') =>
+    request<Telemetry[]>(`/telemetry/history?limit=${limit}&range=${range}${plotId ? `&plot_id=${plotId}` : ''}`),
+  getTelemetryStats: (plotId?: string, range: string = 'day') =>
+    request<{
+      range: string;
+      count: number;
+      temperature: { min: number | null; max: number | null; avg: number | null };
+      humidity: { min: number | null; max: number | null; avg: number | null };
+    }>(`/telemetry/stats?range=${range}${plotId ? `&plot_id=${plotId}` : ''}`),
   ingestTelemetry: (payload: Partial<Telemetry>) =>
     request<Telemetry>('/telemetry', {
       method: 'POST',

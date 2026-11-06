@@ -139,103 +139,103 @@ export const SensorAnalyticsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Charts Grid */}
+      {/* Main Charts Grid: Dedicated to physical DHT22 Temperature & Humidity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Chart 1: Soil Moisture & Soil pH Dual Axis or Linked Time Series */}
-        <div className="agri-card p-5 rounded-2xl space-y-4">
-          <div className="flex items-center justify-between border-b border-agri-border/40 pb-3">
-            <div>
-              <h3 className="text-sm font-bold text-agri-offwhite flex items-center gap-2">
-                <Droplets className="w-4 h-4 text-blue-400" />
-                <span>Soil Moisture (%) & Soil pH</span>
-              </h3>
-              <p className="text-xs text-agri-muted">Underground root-zone moisture and acidity</p>
-            </div>
-            <span className="text-[10px] font-mono text-agri-lime">Range: {rangeFilter.toUpperCase()}</span>
-          </div>
-
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={timeseriesData}>
-                <defs>
-                  <linearGradient id="moistArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="timestamp" stroke="#8E9E94" fontSize={10} tickLine={false} />
-                <YAxis yAxisId="left" stroke="#3B82F6" domain={[0, 100]} fontSize={10} tickLine={false} />
-                <YAxis yAxisId="right" orientation="right" stroke="#A855F7" domain={[4, 9]} fontSize={10} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '12px', fontSize: '11px' }}
-                />
-                <Legend />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="soil_moisture_percent"
-                  name="Soil Moisture (%)"
-                  stroke="#3B82F6"
-                  strokeWidth={2}
-                  fill="url(#moistArea)"
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="soil_ph"
-                  name="Soil pH"
-                  stroke="#A855F7"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Chart 2: Temperature & Relative Humidity */}
+        {/* Chart 1: Ambient Temperature (°C) */}
         <div className="agri-card p-5 rounded-2xl space-y-4">
           <div className="flex items-center justify-between border-b border-agri-border/40 pb-3">
             <div>
               <h3 className="text-sm font-bold text-agri-offwhite flex items-center gap-2">
                 <Thermometer className="w-4 h-4 text-amber-400" />
-                <span>Ambient Temperature & Humidity</span>
+                <span>Ambient Temperature (°C)</span>
               </h3>
-              <p className="text-xs text-agri-muted">DHT22 microclimate environmental correlation</p>
+              <p className="text-xs text-agri-muted">Physical DHT22 thermal trendline</p>
+            </div>
+            <span className="text-[10px] font-mono text-agri-lime">Range: {rangeFilter.toUpperCase()}</span>
+          </div>
+
+          <div className="h-64 w-full">
+            {timeseriesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timeseriesData}>
+                  <defs>
+                    <linearGradient id="tempArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#F59E0B" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="timestamp" stroke="#8E9E94" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#F59E0B" domain={['auto', 'auto']} fontSize={10} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '12px', fontSize: '11px' }}
+                  />
+                  <Legend />
+                  <Area
+                    type="monotone"
+                    dataKey="temperature_c"
+                    name="Temperature (°C)"
+                    stroke="#F59E0B"
+                    strokeWidth={2}
+                    fill="url(#tempArea)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <Thermometer className="w-8 h-8 text-agri-muted opacity-40 mb-2" />
+                <p className="text-xs font-semibold text-agri-offwhite">Waiting for Sensor Data</p>
+                <p className="text-[11px] text-agri-muted">DHT22 telemetry will plot dynamically upon transmission.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Chart 2: Relative Humidity (% RH) */}
+        <div className="agri-card p-5 rounded-2xl space-y-4">
+          <div className="flex items-center justify-between border-b border-agri-border/40 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-agri-offwhite flex items-center gap-2">
+                <Droplets className="w-4 h-4 text-emerald-400" />
+                <span>Relative Humidity (% RH)</span>
+              </h3>
+              <p className="text-xs text-agri-muted">Physical DHT22 moisture saturation curve</p>
             </div>
             <span className="text-[10px] font-mono text-agri-lime">DHT22 Telemetry</span>
           </div>
 
           <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={timeseriesData}>
-                <XAxis dataKey="timestamp" stroke="#8E9E94" fontSize={10} tickLine={false} />
-                <YAxis yAxisId="left" stroke="#F59E0B" domain={[10, 45]} fontSize={10} tickLine={false} />
-                <YAxis yAxisId="right" orientation="right" stroke="#10B981" domain={[20, 100]} fontSize={10} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '12px', fontSize: '11px' }}
-                />
-                <Legend />
-                <Line
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="temperature_c"
-                  name="Temperature (°C)"
-                  stroke="#F59E0B"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="humidity_percent"
-                  name="Humidity (% RH)"
-                  stroke="#10B981"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {timeseriesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timeseriesData}>
+                  <defs>
+                    <linearGradient id="humArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#10B981" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="timestamp" stroke="#8E9E94" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#10B981" domain={[0, 100]} fontSize={10} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0F291E', border: '1px solid #275E47', borderRadius: '12px', fontSize: '11px' }}
+                  />
+                  <Legend />
+                  <Area
+                    type="monotone"
+                    dataKey="humidity_percent"
+                    name="Humidity (% RH)"
+                    stroke="#10B981"
+                    strokeWidth={2}
+                    fill="url(#humArea)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <Droplets className="w-8 h-8 text-agri-muted opacity-40 mb-2" />
+                <p className="text-xs font-semibold text-agri-offwhite">Waiting for Sensor Data</p>
+                <p className="text-[11px] text-agri-muted">DHT22 humidity records will plot dynamically.</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

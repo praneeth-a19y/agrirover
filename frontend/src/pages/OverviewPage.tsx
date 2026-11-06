@@ -58,15 +58,16 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
 
   const isRoverOnline = rover_status.is_online && !rover_status.is_stale;
 
-  // Mock mini-trend for visual dashboard chart
-  const miniChartData = [
-    { time: '04:00', temp: 22, moisture: 46 },
-    { time: '08:00', temp: 24, moisture: 45 },
-    { time: '12:00', temp: 30, moisture: 41 },
-    { time: '16:00', temp: 29, moisture: 43 },
-    { time: '20:00', temp: 25, moisture: 45 },
-    { time: 'Now', temp: latest_telemetry?.temperature_c ?? 27, moisture: latest_telemetry?.soil_moisture_percent ?? 44 },
-  ];
+  // Real telemetry trend data points from latest telemetry
+  const miniChartData = latest_telemetry && (latest_telemetry.temperature_c !== null || latest_telemetry.humidity_percent !== null)
+    ? [
+        {
+          time: new Date(latest_telemetry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          temp: latest_telemetry.temperature_c,
+          hum: latest_telemetry.humidity_percent,
+        }
+      ]
+    : [];
 
   return (
     <div className="space-y-6">
@@ -147,14 +148,16 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-lg font-bold font-mono text-agri-offwhite">
-              {isRoverOnline ? 'Connected' : is_demo_mode ? 'Demo Link' : 'Offline'}
+              {isRoverOnline ? 'Connected (Hardware)' : 'Device Disconnected'}
             </span>
             <span className="text-xs text-agri-muted font-mono">
-              {rover_status.battery_percent ? `${rover_status.battery_percent.toFixed(0)}% Bat` : ''}
+              {isRoverOnline && rover_status.battery_percent ? `${rover_status.battery_percent.toFixed(0)}% Bat` : ''}
             </span>
           </div>
           <div className="mt-3 flex items-center justify-between text-[11px] text-agri-offwhite/70 pt-2 border-t border-agri-border/40">
-            <span className="font-mono text-[10px] text-agri-muted">IP: {rover_status.ip_address || '192.168.1.100'}</span>
+            <span className="font-mono text-[10px] text-agri-muted">
+              {isRoverOnline ? `IP: ${rover_status.ip_address || 'Connected'}` : 'Awaiting ESP32 Heartbeat'}
+            </span>
             <button
               onClick={() => onNavigate('control')}
               className="text-agri-lime hover:underline flex items-center gap-1"
@@ -167,19 +170,21 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
         {/* Crop Health State */}
         <div className="agri-card agri-card-hover p-4 rounded-2xl">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-agri-muted">Crop Health Ratio</span>
+            <span className="text-xs font-medium text-agri-muted">Crop Foliage Scans</span>
             <div className="p-2 rounded-xl bg-agri-forest/50 text-agri-lime border border-agri-border">
               <Sprout className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-agri-offwhite">
-              {total_scans > 0 ? `${Math.round((healthy_scans / total_scans) * 100)}%` : '100%'}
+              {total_scans > 0 ? `${total_scans}` : '0'}
             </span>
-            <span className="text-xs text-agri-muted">Healthy Leaves</span>
+            <span className="text-xs text-agri-muted">
+              {total_scans > 0 ? `(${Math.round((healthy_scans / total_scans) * 100)}% Healthy)` : 'No Scans Yet'}
+            </span>
           </div>
           <div className="mt-3 flex items-center justify-between text-[11px] text-agri-offwhite/70 pt-2 border-t border-agri-border/40">
-            <span>{diseased_scans} Pathogen Alerts</span>
+            <span>{diseased_scans > 0 ? `${diseased_scans} Pathogen Alerts` : 'Awaiting camera capture'}</span>
             <button
               onClick={() => onNavigate('scans')}
               className="text-agri-lime hover:underline flex items-center gap-1"
@@ -250,70 +255,50 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
               </div>
             </div>
 
-            {/* 4 Sensor Metric Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {/* Soil Moisture */}
-              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60">
-                <div className="flex items-center justify-between text-xs text-agri-muted mb-1">
-                  <span className="flex items-center gap-1">
-                    <Droplets className="w-3.5 h-3.5 text-blue-400" /> Moisture
-                  </span>
-                  <span className="text-[10px] text-agri-lime font-mono">Calibrated</span>
-                </div>
-                <div className="text-xl font-bold font-mono text-agri-offwhite">
-                  {latest_telemetry?.soil_moisture_percent !== null && latest_telemetry?.soil_moisture_percent !== undefined
-                    ? `${latest_telemetry.soil_moisture_percent.toFixed(1)}%`
-                    : '--'}
-                </div>
-                <div className="text-[10px] text-agri-muted mt-1">Target: 30% - 80%</div>
-              </div>
-
-              {/* Soil pH */}
-              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60">
-                <div className="flex items-center justify-between text-xs text-agri-muted mb-1">
-                  <span className="flex items-center gap-1">
-                    <Gauge className="w-3.5 h-3.5 text-purple-400" /> Soil pH
-                  </span>
-                  <span className="text-[10px] text-purple-300 font-mono">Analog</span>
-                </div>
-                <div className="text-xl font-bold font-mono text-agri-offwhite">
-                  {latest_telemetry?.soil_ph !== null && latest_telemetry?.soil_ph !== undefined
-                    ? `${latest_telemetry.soil_ph.toFixed(2)}`
-                    : '--'}
-                </div>
-                <div className="text-[10px] text-agri-muted mt-1">Optimum: 6.0 - 7.5</div>
-              </div>
-
+            {/* Two Physical Connected Sensors (DHT22 on ESP32 GPIO 4) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Temperature */}
-              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60">
-                <div className="flex items-center justify-between text-xs text-agri-muted mb-1">
-                  <span className="flex items-center gap-1">
-                    <Thermometer className="w-3.5 h-3.5 text-amber-400" /> Canopy Temp
+              <div className="p-4 rounded-xl bg-agri-darkest/70 border border-agri-border/60 space-y-2">
+                <div className="flex items-center justify-between text-xs text-agri-muted">
+                  <span className="flex items-center gap-1.5 font-semibold text-agri-offwhite">
+                    <Thermometer className="w-4 h-4 text-amber-400" /> Canopy Temperature
                   </span>
-                  <span className="text-[10px] text-agri-muted font-mono">DHT22</span>
+                  <span className="text-[10px] text-amber-400 font-mono font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                    DHT22 GPIO 4
+                  </span>
                 </div>
-                <div className="text-xl font-bold font-mono text-agri-offwhite">
+                <div className="text-3xl font-extrabold font-mono text-agri-offwhite">
                   {latest_telemetry?.temperature_c !== null && latest_telemetry?.temperature_c !== undefined
                     ? `${latest_telemetry.temperature_c.toFixed(1)}°C`
-                    : '--'}
+                    : '-- °C'}
                 </div>
-                <div className="text-[10px] text-agri-muted mt-1">Threshold: &lt; 38°C</div>
+                <div className="text-[11px] text-agri-muted">
+                  {latest_telemetry?.temperature_c !== null && latest_telemetry?.temperature_c !== undefined
+                    ? 'Actual reading received via EMQX MQTT'
+                    : 'Waiting for hardware sensor data...'}
+                </div>
               </div>
 
               {/* Humidity */}
-              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60">
-                <div className="flex items-center justify-between text-xs text-agri-muted mb-1">
-                  <span className="flex items-center gap-1">
-                    <Droplets className="w-3.5 h-3.5 text-emerald-400" /> Rel. Humidity
+              <div className="p-4 rounded-xl bg-agri-darkest/70 border border-agri-border/60 space-y-2">
+                <div className="flex items-center justify-between text-xs text-agri-muted">
+                  <span className="flex items-center gap-1.5 font-semibold text-agri-offwhite">
+                    <Droplets className="w-4 h-4 text-emerald-400" /> Relative Humidity
                   </span>
-                  <span className="text-[10px] text-agri-muted font-mono">DHT22</span>
+                  <span className="text-[10px] text-emerald-400 font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                    DHT22 GPIO 4
+                  </span>
                 </div>
-                <div className="text-xl font-bold font-mono text-agri-offwhite">
+                <div className="text-3xl font-extrabold font-mono text-agri-offwhite">
                   {latest_telemetry?.humidity_percent !== null && latest_telemetry?.humidity_percent !== undefined
                     ? `${latest_telemetry.humidity_percent.toFixed(1)}%`
-                    : '--'}
+                    : '-- %'}
                 </div>
-                <div className="text-[10px] text-agri-muted mt-1">Target: 40% - 85%</div>
+                <div className="text-[11px] text-agri-muted">
+                  {latest_telemetry?.humidity_percent !== null && latest_telemetry?.humidity_percent !== undefined
+                    ? 'Actual reading received via EMQX MQTT'
+                    : 'Waiting for hardware sensor data...'}
+                </div>
               </div>
             </div>
 
@@ -386,13 +371,16 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
               </span>
             </div>
 
-            {latest_scan ? (
+            {latest_scan && !latest_scan.is_demo ? (
               <div className="space-y-3">
                 <div className="relative aspect-video rounded-xl overflow-hidden border border-agri-border bg-agri-darkest">
                   <img
                     src={latest_scan.image_url}
                     alt={latest_scan.predicted_class}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
                   />
                   <div className="absolute top-2 right-2">
                     <span
@@ -417,31 +405,34 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
                     </span>
                   </div>
                   <p className="text-[11px] text-agri-muted mt-0.5">
-                    Plot: {latest_scan.plot_id || 'North Tomato Field'} | Row: {latest_scan.row_id || 'Row A1'}
+                    Plot: {latest_scan.plot_id || 'Plot 1'} | Timestamp: {new Date(latest_scan.timestamp).toLocaleTimeString()}
                   </p>
                 </div>
 
                 <div className="pt-2 border-t border-agri-border/40 flex items-center justify-between text-xs">
                   <span className="text-agri-muted text-[11px]">
-                    Mode: {latest_scan.inference_mode}
+                    Model: MobileNetV2
                   </span>
                   <button
                     onClick={() => onNavigate('disease')}
                     className="text-agri-lime hover:underline font-medium flex items-center gap-1 text-xs"
                   >
-                    Diagnose Now <ArrowRight className="w-3 h-3" />
+                    View Details <ArrowRight className="w-3 h-3" />
                   </button>
                 </div>
               </div>
             ) : (
               <div className="py-8 text-center space-y-2">
                 <ScanEye className="w-8 h-8 text-agri-muted mx-auto opacity-40" />
-                <p className="text-xs text-agri-muted">No crop scans recorded yet.</p>
+                <p className="text-xs font-semibold text-agri-offwhite">No Camera Image Available</p>
+                <p className="text-[11px] text-agri-muted max-w-[220px] mx-auto">
+                  Awaiting actual ESP32-S3-CAM photograph or manual upload.
+                </p>
                 <button
                   onClick={() => onNavigate('disease')}
-                  className="px-3 py-1.5 rounded-lg bg-agri-lime text-agri-darkest font-semibold text-xs inline-block"
+                  className="px-3 py-1.5 rounded-lg bg-agri-lime text-agri-darkest font-semibold text-xs inline-block shadow-md mt-1"
                 >
-                  Upload First Leaf Image
+                  Go to Camera Section
                 </button>
               </div>
             )}

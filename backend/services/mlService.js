@@ -341,8 +341,8 @@ function getLatestCapture() {
   return latestCapture;
 }
 
-function getDiseaseScans({ plotId, isHealthy, limit = 50 }) {
-  let query = 'SELECT * FROM disease_scans WHERE 1=1';
+function getDiseaseScans({ plotId, isHealthy, limit = 50, includeDemo = false }) {
+  let query = includeDemo ? 'SELECT * FROM disease_scans WHERE 1=1' : 'SELECT * FROM disease_scans WHERE is_demo = 0';
   const params = [];
 
   if (plotId) {

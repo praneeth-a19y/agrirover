@@ -310,9 +310,6 @@ void sendTelemetry() {
 
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
-  int rawMoistureAdc = analogRead(SOIL_MOISTURE_PIN);
-  int rawPhAdc = analogRead(SOIL_PH_PIN);
-  float rawPhVoltage = (rawPhAdc / 4095.0f) * 3.3f;
   float batteryPercent = readBatteryPercentage();
 
   StaticJsonDocument<384> doc;
@@ -330,12 +327,7 @@ void sendTelemetry() {
     doc["humidity_percent"] = round(hum * 10.0f) / 10.0f;
   }
 
-  // Two-point moisture estimate (Dry ~3200, Wet ~1400)
-  float soilMoistureEst = ((3200.0f - rawMoistureAdc) / (3200.0f - 1400.0f)) * 100.0f;
-  doc["soil_moisture"]    = constrain(round(soilMoistureEst * 10.0f) / 10.0f, 0.0f, 100.0f);
-  doc["soil_ph"]          = round((7.0f - (rawPhVoltage - 2.5f) * 3.5f) * 10.0f) / 10.0f;
-  doc["raw_moisture_adc"] = rawMoistureAdc;
-  doc["raw_ph_voltage"]   = round(rawPhVoltage * 100.0f) / 100.0f;
+  // Only real physical hardware readings are transmitted (Soil moisture & pH excluded)
   doc["battery"]          = round(batteryPercent);
   doc["battery_percent"]  = round(batteryPercent);
   doc["signal_rssi"]      = WiFi.RSSI();
@@ -361,8 +353,8 @@ void sendTelemetry() {
     mqttClient.publish(TOPIC_ROVER_SENSORS_HUM, hBuf);
   }
 
-  Serial.printf("[TELEMETRY] Temp=%.1fC | Hum=%.1f%% | MoistureADC=%d | pH_V=%.2fV | Batt=%.0f%%\n",
-                temp, hum, rawMoistureAdc, rawPhVoltage, batteryPercent);
+  Serial.printf("[TELEMETRY] DHT22 Temp=%.1fC | DHT22 Hum=%.1f%% | Batt=%.0f%% | RSSI=%d dBm\n",
+                temp, hum, batteryPercent, WiFi.RSSI());
 }
 
 void sendRoverStatus(bool isOnline) {

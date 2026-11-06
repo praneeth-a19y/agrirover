@@ -9,7 +9,7 @@ function getTimeseries(req, res, next) {
     if (range_filter === '6h') limit = 24;
     if (range_filter === '7d') limit = 100;
 
-    let query = 'SELECT * FROM telemetry WHERE 1=1';
+    let query = 'SELECT * FROM telemetry WHERE is_simulated = 0';
     const params = [];
     if (plot_id) {
       query += ' AND plot_id = ?';
@@ -31,7 +31,7 @@ function getTimeseries(req, res, next) {
 function getDiseaseDistribution(req, res, next) {
   try {
     const { plot_id } = req.query;
-    let query = 'SELECT predicted_class, is_healthy, COUNT(*) as count FROM disease_scans WHERE 1=1';
+    let query = 'SELECT predicted_class, is_healthy, COUNT(*) as count FROM disease_scans WHERE is_demo = 0';
     const params = [];
     if (plot_id) {
       query += ' AND plot_id = ?';
@@ -77,7 +77,7 @@ function exportCsv(req, res, next) {
     const { data_type = 'telemetry', plot_id } = req.query;
 
     if (data_type === 'telemetry') {
-      let query = 'SELECT * FROM telemetry WHERE 1=1';
+      let query = 'SELECT * FROM telemetry WHERE is_simulated = 0';
       const params = [];
       if (plot_id) {
         query += ' AND plot_id = ?';
@@ -89,15 +89,15 @@ function exportCsv(req, res, next) {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename="telemetry_export.csv"');
 
-      let csv = 'id,device_id,farm_id,plot_id,temperature_c,humidity_percent,soil_moisture_percent,soil_ph,is_simulated,timestamp\n';
+      let csv = 'id,device_id,farm_id,plot_id,temperature_c,humidity_percent,battery_level,is_simulated,timestamp\n';
       for (const r of rows) {
-        csv += `${r.id},${r.device_id},${r.farm_id},${r.plot_id},${r.temperature_c},${r.humidity_percent},${r.soil_moisture_percent},${r.soil_ph},${r.is_simulated},"${r.timestamp}"\n`;
+        csv += `${r.id},${r.device_id},${r.farm_id},${r.plot_id},${r.temperature_c},${r.humidity_percent},${r.battery_level || ''},${r.is_simulated},"${r.timestamp}"\n`;
       }
       return res.send(csv);
     }
 
     // Scans export
-    let query = 'SELECT * FROM disease_scans WHERE 1=1';
+    let query = 'SELECT * FROM disease_scans WHERE is_demo = 0';
     const params = [];
     if (plot_id) {
       query += ' AND plot_id = ?';

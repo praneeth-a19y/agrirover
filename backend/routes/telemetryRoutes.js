@@ -5,6 +5,7 @@ const { validateTelemetryPayload } = require('../middleware/validator');
 
 router.get('/latest', telemetryController.getLatest);
 router.get('/history', telemetryController.getHistory);
+router.get('/stats', telemetryController.getStats);
 router.post('/', validateTelemetryPayload, telemetryController.ingest);
 
 module.exports = router;

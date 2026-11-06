@@ -11,7 +11,8 @@ import {
   ShieldAlert,
   Info,
   Clock,
-  Sprout
+  Sprout,
+  Download
 } from 'lucide-react';
 import { api } from '../services/api';
 import { DiseaseScanHistoryItem, DiseasePrediction, Plot } from '../types';
@@ -152,6 +153,9 @@ export const ScanHistoryPage: React.FC = () => {
               <img
                 src={scan.image_url}
                 alt={scan.predicted_class}
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
               <div className="absolute top-2 right-2">
@@ -172,7 +176,7 @@ export const ScanHistoryPage: React.FC = () => {
 
             <div className="space-y-1">
               <h4 className="text-sm font-bold text-agri-offwhite truncate" title={scan.predicted_class}>
-                {scan.predicted_class}
+                {scan.predicted_class.replace(/___/g, ' - ').replace(/_/g, ' ')}
               </h4>
               <div className="flex items-center justify-between text-[11px] text-agri-muted">
                 <span>{scan.plot_id || 'North Tomato Field'}</span>
@@ -181,7 +185,7 @@ export const ScanHistoryPage: React.FC = () => {
               <div className="pt-2 border-t border-agri-border/40 flex items-center justify-between text-[10px] text-agri-muted">
                 <span className="flex items-center gap-1 font-mono">
                   <Clock className="w-3 h-3" />
-                  {new Date(scan.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                  {new Date(scan.timestamp).toISOString().replace('T', ' ').substring(0, 19)}
                 </span>
                 <span className="text-agri-lime font-medium group-hover:underline flex items-center gap-1">
                   Inspect <ExternalLink className="w-2.5 h-2.5" />
@@ -275,13 +279,23 @@ export const ScanHistoryPage: React.FC = () => {
                 <div className="p-2 rounded-lg bg-agri-darkest border border-agri-border">
                   <span className="text-agri-muted block text-[10px]">Captured:</span>
                   <span className="text-agri-offwhite font-bold">
-                    {new Date(activeScanDetail.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(activeScanDetail.timestamp).toISOString().replace('T', ' ').substring(0, 19)}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-agri-border/60">
+            <div className="flex items-center justify-between pt-3 border-t border-agri-border/60">
+              <a
+                href={activeScanDetail.image_url}
+                download={`agrirover-scan-${activeScanDetail.scan_id}.jpg`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-agri-lime text-agri-darkest text-xs font-semibold shadow-md hover:bg-agri-lime/90 transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Photo</span>
+              </a>
               <button
                 onClick={() => setActiveScanDetail(null)}
                 className="px-5 py-2 rounded-xl bg-agri-card hover:bg-agri-cardHover text-agri-offwhite text-xs font-semibold"
