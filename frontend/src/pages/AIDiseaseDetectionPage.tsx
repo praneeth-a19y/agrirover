@@ -20,6 +20,7 @@ import {
   Bot
 } from 'lucide-react';
 import { api } from '../services/api';
+import { socketService } from '../services/socketService';
 import { DiseasePrediction, DiseaseScanHistoryItem, Plot } from '../types';
 
 interface AIDiseaseDetectionPageProps {
@@ -68,12 +69,49 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [isTriggeringMqtt, setIsTriggeringMqtt] = useState<boolean>(false);
+
   useEffect(() => {
     loadPlots();
     loadRecentScans();
     loadModelStatus();
     loadLatestRoverCapture();
+
+    // Real-Time Socket.IO Subscriptions for instant image & disease detection updates
+    const unsubCap = socketService.onCameraCapture((cap) => {
+      if (cap && cap.has_image) {
+        setLatestRoverCapture(cap);
+        if (cap.prediction) {
+          setPrediction(cap.prediction);
+        }
+        loadRecentScans();
+      }
+    });
+
+    const unsubScan = socketService.onDiseaseScan((pred) => {
+      if (pred) {
+        setPrediction(pred);
+        loadRecentScans();
+      }
+    });
+
+    return () => {
+      unsubCap();
+      unsubScan();
+    };
   }, []);
+
+  const handleTriggerMqttCapture = async () => {
+    setIsTriggeringMqtt(true);
+    try {
+      await api.sendRoverCommand('CAPTURE', 1000);
+      // Brief feedback
+    } catch (err: any) {
+      alert('MQTT Camera dispatch error: ' + err.message);
+    } finally {
+      setTimeout(() => setIsTriggeringMqtt(false), 2000);
+    }
+  };
 
   // Poll for incoming images sent by ESP32-CAM
   useEffect(() => {
@@ -310,7 +348,30 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
                   }`}
                 >
                   <RefreshCw className={`w-3 h-3 ${autoPollRover ? 'animate-spin' : ''}`} />
-                  <span>{autoPollRover ? 'Listening (3s Poll)' : 'Paused'}</span>
+                  <span>{autoPollRover ? 'Live Sync Active' : 'Paused'}</span>
+                </button>
+              </div>
+
+              {/* Trigger Rover Camera via EMQX MQTT Broker */}
+              <div className="p-3 rounded-xl bg-agri-darkest/90 border border-agri-lime/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-agri-lime animate-pulse" />
+                  <div>
+                    <span className="text-agri-offwhite font-bold block">Cloud MQTT Camera Trigger</span>
+                    <span className="text-[10px] text-agri-muted">Dispatches command to rover/camera/capture</span>
+                  </div>
+                </div>
+                <button
+                  onClick={handleTriggerMqttCapture}
+                  disabled={isTriggeringMqtt}
+                  className="w-full sm:w-auto px-4 py-2 rounded-xl bg-agri-lime hover:bg-agri-lime/90 text-agri-darkest font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-lime-500/10 active:scale-95 disabled:opacity-50"
+                >
+                  {isTriggeringMqtt ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4" />
+                  )}
+                  <span>{isTriggeringMqtt ? 'Sending MQTT...' : '📸 Snap Photo via MQTT'}</span>
                 </button>
               </div>
 

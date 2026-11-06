@@ -159,6 +159,7 @@ function initDatabase() {
       plot_id VARCHAR(50),
       row_id VARCHAR(50),
       image_url VARCHAR(500) NOT NULL,
+      image_base64 TEXT,
       original_filename VARCHAR(200),
       predicted_class VARCHAR(120) NOT NULL,
       confidence FLOAT NOT NULL,
@@ -172,6 +173,12 @@ function initDatabase() {
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  try {
+    db.exec(`ALTER TABLE disease_scans ADD COLUMN image_base64 TEXT;`);
+  } catch {
+    // Column already exists
+  }
 
   // 10. System Settings
   db.exec(`

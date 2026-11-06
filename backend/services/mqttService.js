@@ -62,6 +62,10 @@ function initMQTT() {
         MQTT_TOPICS.SUB_ALL_TELEMETRY,
         MQTT_TOPICS.SUB_ALL_STATUS,
         MQTT_TOPICS.SUB_ALL_ACK,
+        MQTT_TOPICS.SUB_ROVER_SENSORS,
+        MQTT_TOPICS.SUB_ROVER_COMMANDS,
+        MQTT_TOPICS.SUB_ROVER_STATUS,
+        MQTT_TOPICS.SUB_ROVER_CAMERA,
       ];
 
       mqttClient.subscribe(topicsToSubscribe, { qos: 1 }, (err, granted) => {
@@ -203,21 +207,28 @@ function publishCommand(deviceId, commandRecord) {
   }
 
   const topic = MQTT_TOPICS.COMMAND_TOPIC(deviceId);
+  const isCapture = commandRecord.command === 'CAPTURE';
+  const isSpeed = commandRecord.command === 'SPEED_SET';
+  const isLed = commandRecord.command === 'LED_SET';
+
   const payload = {
     commandId: commandRecord.command_id || String(commandRecord.id),
     command_id: commandRecord.command_id || String(commandRecord.id),
     id: commandRecord.id,
     deviceId: deviceId,
     device_id: deviceId,
-    type: commandRecord.command === 'LED_SET' ? 'LED_SET' : 'MOTOR_CONTROL',
-    value: commandRecord.command === 'LED_SET' ? commandRecord.value : commandRecord.command,
+    type: isCapture ? 'CAMERA_CAPTURE' : isSpeed ? 'SPEED_SET' : isLed ? 'LED_SET' : 'MOTOR_CONTROL',
+    value: isLed ? commandRecord.value : isSpeed ? commandRecord.value : commandRecord.command,
     command: commandRecord.command,
+    speed: isSpeed ? commandRecord.value : undefined,
     durationMs: commandRecord.duration_ms || 1000,
     duration_ms: commandRecord.duration_ms || 1000,
     timestamp: new Date().toISOString(),
   };
 
   const payloadString = JSON.stringify(payload);
+
+  // Publish on device-scoped topic
   mqttClient.publish(topic, payloadString, { qos: 1 }, (err) => {
     if (err) {
       logger.error('MQTT', `Failed to publish command to ${topic}:`, err);
@@ -226,12 +237,47 @@ function publishCommand(deviceId, commandRecord) {
     }
   });
 
+  // Also publish on functional rover topic
+  if (isCapture) {
+    mqttClient.publish(MQTT_TOPICS.ROVER_CAMERA_CAPTURE, payloadString, { qos: 1 });
+    mqttClient.publish(MQTT_TOPICS.CAMERA_CAPTURE_TOPIC(deviceId), payloadString, { qos: 1 });
+  } else {
+    mqttClient.publish(MQTT_TOPICS.ROVER_COMMANDS_MOTOR, payloadString, { qos: 1 });
+  }
+
   return true;
+}
+
+function publishAiResult(prediction) {
+  if (!mqttClient || !isConnected) return false;
+  try {
+    const payloadString = JSON.stringify({
+      device_id: prediction.device_id || config.defaultDeviceId,
+      scan_id: prediction.scan_id,
+      predicted_class: prediction.predicted_class,
+      confidence: prediction.confidence,
+      severity: prediction.severity,
+      disease_name: prediction.diseaseName,
+      is_healthy: prediction.is_healthy,
+      image_url: prediction.image_url,
+      recommendations: prediction.recommendations,
+      timestamp: prediction.timestamp || new Date().toISOString(),
+    });
+
+    mqttClient.publish(MQTT_TOPICS.ROVER_AI_RESULTS, payloadString, { qos: 1 });
+    mqttClient.publish(MQTT_TOPICS.AI_RESULTS_TOPIC(prediction.device_id || config.defaultDeviceId), payloadString, { qos: 1 });
+    logger.mqtt('PUBLISH', `Published AI diagnosis result to ${MQTT_TOPICS.ROVER_AI_RESULTS}`);
+    return true;
+  } catch (err) {
+    logger.error('MQTT', 'Failed to publish AI result:', err);
+    return false;
+  }
 }
 
 module.exports = {
   initMQTT,
   publishCommand,
+  publishAiResult,
   isMqttConnected: () => Boolean(isConnected && mqttClient && mqttClient.connected),
   getClient: () => mqttClient,
 };

@@ -19,6 +19,8 @@ import {
   Lightbulb,
   Radio,
   Zap,
+  Camera,
+  Gauge,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { socketService } from '../services/socketService';
@@ -42,6 +44,8 @@ export const RoverControlPage: React.FC<RoverControlPageProps> = ({
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastAckMessage, setLastAckMessage] = useState<string | null>(null);
   const [ledActive, setLedActive] = useState<boolean>(false);
+  const [motorSpeed, setMotorSpeed] = useState<number>(220);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
 
   const isOnline = roverStatus?.is_online && !roverStatus?.is_stale;
 
@@ -124,6 +128,30 @@ export const RoverControlPage: React.FC<RoverControlPageProps> = ({
       loadCommandHistory();
     } catch (err) {
       alert('LED command dispatch failed: ' + (err as Error).message);
+    }
+  };
+
+  const handleSpeedChange = async (newSpeed: number) => {
+    setMotorSpeed(newSpeed);
+    try {
+      await api.sendRoverCommand('SPEED_SET', 1000, newSpeed);
+      setLastAckMessage(`Motor Speed PWM set to ${newSpeed}/255 via MQTT`);
+      loadCommandHistory();
+    } catch (err) {
+      console.error('Speed update error:', err);
+    }
+  };
+
+  const handleCameraCapture = async () => {
+    setIsCapturing(true);
+    try {
+      const res = await api.sendRoverCommand('CAPTURE', 1000);
+      setLastAckMessage(`Camera snapshot command queued (ID #${res.id}) via MQTT`);
+      loadCommandHistory();
+    } catch (err) {
+      alert('Camera capture trigger failed: ' + (err as Error).message);
+    } finally {
+      setTimeout(() => setIsCapturing(false), 2000);
     }
   };
 
@@ -265,6 +293,52 @@ export const RoverControlPage: React.FC<RoverControlPageProps> = ({
                   onRefresh();
                 }}
               />
+
+              {/* Motor Speed PWM Control */}
+              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 text-agri-offwhite font-medium">
+                    <Gauge className="w-4 h-4 text-agri-lime" />
+                    <span>L298N Motor PWM Speed</span>
+                  </div>
+                  <span className="font-mono text-agri-lime font-bold">{motorSpeed} / 255</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-mono text-agri-muted">80 (Min)</span>
+                  <input
+                    type="range"
+                    min="80"
+                    max="255"
+                    step="5"
+                    value={motorSpeed}
+                    onChange={(e) => setMotorSpeed(Number(e.target.value))}
+                    onMouseUp={() => handleSpeedChange(motorSpeed)}
+                    onTouchEnd={() => handleSpeedChange(motorSpeed)}
+                    className="flex-1 accent-agri-lime cursor-pointer"
+                  />
+                  <span className="text-[10px] font-mono text-agri-muted">255 (Max)</span>
+                </div>
+              </div>
+
+              {/* Camera Trigger Command */}
+              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Camera className="w-4 h-4 text-agri-lime" />
+                  <div>
+                    <span className="text-xs font-semibold text-agri-offwhite block">ESP32-S3-CAM Snapshot</span>
+                    <span className="text-[10px] text-agri-muted">Triggers MQTT capture & AI detection</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleCameraCapture}
+                  disabled={isCapturing}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all flex items-center gap-1.5 bg-agri-lime text-agri-darkest hover:bg-agri-lime/90 disabled:opacity-50 shadow-md shadow-lime-500/10 active:scale-95"
+                >
+                  {isCapturing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                  <span>{isCapturing ? 'Snapping...' : 'Snap Photo'}</span>
+                </button>
+              </div>
 
               {/* Auxiliary Hardware Controls (Phase 5 requirement) */}
               <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60 flex items-center justify-between">

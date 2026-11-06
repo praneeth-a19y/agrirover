@@ -90,11 +90,11 @@ export const api = {
 
   // Rover Control & Teleoperation
   getRoverStatus: () => request<RoverStatus>('/rover/status'),
-  sendRoverCommand: (command: string, durationMs: number = 1000) =>
+  sendRoverCommand: (command: string, durationMs: number = 1000, value?: number | string) =>
     request<RoverCommand>('/rover/commands', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command, duration_ms: durationMs, device_id: 'rover-001' }),
+      body: JSON.stringify({ command, duration_ms: durationMs, value, device_id: 'agrirover-01' }),
     }),
   getRoverCommandHistory: (limit: number = 30) =>
     request<RoverCommand[]>(`/rover/commands/history?limit=${limit}`),

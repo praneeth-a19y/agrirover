@@ -1,29 +1,38 @@
 /**
  * ============================================================================
- * AGRIROVER — ESP32 IOT TELEOPERATION & SENSOR MONITORING FIRMWARE
+ * AGRIROVER — COMPLETE ESP32 TELEOPERATION & SENSOR MONITORING FIRMWARE
  * ============================================================================
- * Architecture:
- *   ESP32 (TLS Port 8883) <---> EMQX Cloud Serverless <---> Render Backend <---> Web Dashboard
+ * EPICS Project: Smart Agriculture Rover — AI-Powered Crop & Soil System
  * 
- * Target Hardware:
- *   - Microcontroller : ESP32 DevKit V1 (30-pin or 38-pin)
- *   - Motor Driver    : L298N Dual H-Bridge (4WD DC Geared Motors)
- *   - Environment     : DHT22 (Temperature & Humidity)
- *   - Soil Moisture   : Capacitive Analog Moisture Sensor V1.2
- *   - Soil pH         : Analog pH Sensor Board
- *   - Battery Voltage : 10k/10k Resistor Voltage Divider
+ * Target Board: ESP32 DevKit V1 (30-pin or 38-pin module)
  * 
- * Required Arduino Libraries:
+ * Hardware Peripherals Connected:
+ *   - L298N Dual H-Bridge Motor Driver (4WD Geared DC Motors):
+ *       • IN1 -> GPIO 18 (Left Forward)
+ *       • IN2 -> GPIO 19 (Left Reverse)
+ *       • IN3 -> GPIO 21 (Right Forward)
+ *       • IN4 -> GPIO 22 (Right Reverse)
+ *       • ENA -> GPIO 23 (Left Motor PWM Speed)
+ *       • ENB -> GPIO 25 (Right Motor PWM Speed)
+ *   - Environmental Sensors:
+ *       • DHT22 Temperature & Humidity -> GPIO 4 (1-Wire digital with 10k pull-up)
+ *       • Capacitive Soil Moisture Sensor -> GPIO 34 (ADC1 Channel 6)
+ *       • Analog Soil pH Sensor Board -> GPIO 35 (ADC1 Channel 7)
+ *       • Battery Voltage Divider (10k/10k) -> GPIO 36 (ADC1 Channel 0)
+ *   - Indicators & Auxiliary:
+ *       • Auxiliary Headlight / Status LED -> GPIO 2
+ *       • Camera Hardware Trigger Line -> GPIO 13 (Pulses high on CAPTURE)
+ * 
+ * Communication & Cloud Architecture:
+ *   ESP32 (Port 8883 TLS) <---> EMQX Cloud Serverless <---> Render Backend <---> Web Dashboard
+ * 
+ * Required Arduino IDE Libraries:
  *   1. WiFi (built-in ESP32 core)
  *   2. WiFiClientSecure (built-in ESP32 core)
- *   3. PubSubClient by Nick O'Leary
+ *   3. PubSubClient by Nick O'Leary (install via Library Manager)
  *   4. ArduinoJson by Benoit Blanchon (v6.x or v7.x)
  *   5. DHT sensor library by Adafruit
  *   6. Adafruit Unified Sensor
- * 
- * Security:
- *   - Connects over MQTT TLS (Port 8883) with DigiCert Root CA verification.
- *   - Never uses insecure plaintext or setInsecure() in production.
  * ============================================================================
  */
 
@@ -33,13 +42,13 @@
 #include <ArduinoJson.h>
 #include <DHT.h>
 
-// If secrets.h exists locally, load private Wi-Fi and MQTT credentials from it
+// Load private credentials from secrets.h if present
 #if __has_include("secrets.h")
   #include "secrets.h"
 #endif
 
 // ----------------------------------------------------------------------------
-// 1. CONFIGURATION FALLBACKS (Override in secrets.h)
+// 1. NETWORK & CLOUD BROKER CREDENTIALS
 // ----------------------------------------------------------------------------
 #ifndef SECRET_WIFI_SSID
   #define SECRET_WIFI_SSID     "YOUR_WIFI_SSID"
@@ -80,7 +89,7 @@ const char* DEVICE_ID     = SECRET_DEVICE_ID;
 const char* FARM_ID       = "farm-001";
 const char* PLOT_ID       = "plot-001";
 
-// DigiCert Global Root G2 CA Certificate (Default for EMQX Cloud *.emqxsl.com TLS verification)
+// DigiCert Global Root G2 CA Certificate (EMQX Cloud *.emqxsl.com TLS verification)
 #ifndef EMQX_CA_CERT
 static const char EMQX_CA_CERT[] PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
@@ -111,22 +120,30 @@ MrY=
 // ----------------------------------------------------------------------------
 // 2. HARDWARE PIN DEFINITIONS
 // ----------------------------------------------------------------------------
-#define STATUS_LED_PIN    2    // Onboard Blue Status LED
+#define STATUS_LED_PIN       2    // Onboard Blue Status / Headlight LED
+#define CAMERA_TRIGGER_PIN   13   // Hardware pulse trigger to ESP32-S3-CAM
 
 // Environmental Sensors
-#define DHTPIN            4    // DHT22 1-Wire Digital Data Pin
-#define DHTTYPE           DHT22
-#define SOIL_MOISTURE_PIN 34   // Capacitive Moisture Sensor (ADC1_CH6)
-#define SOIL_PH_PIN       35   // Analog pH Sensor Conditioning Board (ADC1_CH7)
-#define BATTERY_PIN       36   // 2:1 Voltage Divider (ADC1_CH0)
+#define DHTPIN               4    // DHT22 1-Wire Digital Data Pin
+#define DHTTYPE              DHT22
+#define SOIL_MOISTURE_PIN    34   // Capacitive Moisture Sensor (ADC1_CH6)
+#define SOIL_PH_PIN          35   // Analog pH Sensor Conditioning Board (ADC1_CH7)
+#define BATTERY_PIN          36   // 2:1 Voltage Divider (ADC1_CH0)
 
 // L298N Dual H-Bridge Motor Driver
-#define MOTOR_LEFT_IN1    18
-#define MOTOR_LEFT_IN2    19
-#define MOTOR_RIGHT_IN3   21
-#define MOTOR_RIGHT_IN4   22
-#define MOTOR_ENABLE_A    23
-#define MOTOR_ENABLE_B    25
+#define MOTOR_LEFT_IN1       18
+#define MOTOR_LEFT_IN2       19
+#define MOTOR_RIGHT_IN3      21
+#define MOTOR_RIGHT_IN4      22
+#define MOTOR_ENABLE_A       23   // PWM Left Motor Channel
+#define MOTOR_ENABLE_B       25   // PWM Right Motor Channel
+
+// PWM Configuration
+const int PWM_FREQ        = 5000;
+const int PWM_RESOLUTION  = 8;     // 8-bit resolution: 0 - 255
+const int PWM_CH_LEFT     = 0;
+const int PWM_CH_RIGHT    = 1;
+int currentMotorSpeed     = 220;   // Default motor speed PWM (0-255)
 
 // ----------------------------------------------------------------------------
 // 3. OBJECTS & STATE TIMERS
@@ -135,41 +152,55 @@ WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
 DHT dht(DHTPIN, DHTTYPE);
 
-String TOPIC_COMMAND;
-String TOPIC_TELEMETRY;
-String TOPIC_STATUS;
-String TOPIC_ACK;
+// MQTT Topics (Device scoped + Rover standard topology)
+String TOPIC_COMMAND_DEVICE;
+String TOPIC_TELEMETRY_DEVICE;
+String TOPIC_STATUS_DEVICE;
+String TOPIC_ACK_DEVICE;
 
-const unsigned long TELEMETRY_INTERVAL_MS = 5000;
-const unsigned long STATUS_INTERVAL_MS    = 15000;
-unsigned long lastTelemetryTime           = 0;
-unsigned long lastStatusTime              = 0;
-unsigned long lastReconnectAttempt        = 0;
+const char* TOPIC_ROVER_SENSORS_DATA = "rover/sensors/data";
+const char* TOPIC_ROVER_SENSORS_TEMP = "rover/sensors/temperature";
+const char* TOPIC_ROVER_SENSORS_HUM  = "rover/sensors/humidity";
+const char* TOPIC_ROVER_STATUS_CONN  = "rover/status/connection";
+const char* TOPIC_ROVER_STATUS_TELEM = "rover/status/telemetry";
+const char* TOPIC_ROVER_COMMANDS_MOTOR = "rover/commands/motor";
+const char* TOPIC_ROVER_COMMANDS_ACK = "rover/commands/ack";
+const char* TOPIC_ROVER_CAMERA_CAPTURE = "rover/camera/capture";
 
-unsigned long motorCutoffTimestamp        = 0;
-bool isMotorActive                        = false;
+// Timing intervals
+const unsigned long TELEMETRY_INTERVAL_MS = 5000;  // Publish telemetry every 5s
+const unsigned long STATUS_INTERVAL_MS    = 15000; // Heartbeat every 15s
+const unsigned long SAFETY_WATCHDOG_MS   = 2500;  // Max motor run if no keepalive
+
+unsigned long lastTelemetryTime  = 0;
+unsigned long lastStatusTime     = 0;
+unsigned long motorCutoffTime    = 0;
+unsigned long lastWifiCheckTime  = 0;
+unsigned long lastMqttRetryTime  = 0;
+
+bool isMotorActive          = false;
+bool emergencyStopActive    = false;
+bool ledState               = false;
+
+// Forward function declarations
+void stopMotors();
+void sendRoverStatus(bool isOnline);
+void sendTelemetry();
+void sendAcknowledgement(const char* commandId, const char* statusStr, const char* messageStr);
+void onMqttMessage(char* topic, byte* payload, unsigned int length);
 
 // ----------------------------------------------------------------------------
-// 4. MOTOR CONTROL FUNCTIONS (FAILSAFE WATCHDOG)
+// 4. MOTOR CONTROL & WATCHDOG SAFETY
 // ----------------------------------------------------------------------------
-void setupMotors() {
-  pinMode(MOTOR_LEFT_IN1, OUTPUT);
-  pinMode(MOTOR_LEFT_IN2, OUTPUT);
-  pinMode(MOTOR_RIGHT_IN3, OUTPUT);
-  pinMode(MOTOR_RIGHT_IN4, OUTPUT);
-  pinMode(MOTOR_ENABLE_A, OUTPUT);
-  pinMode(MOTOR_ENABLE_B, OUTPUT);
-
-  // Guarantee all motors are off during boot
-  digitalWrite(MOTOR_LEFT_IN1, LOW);
-  digitalWrite(MOTOR_LEFT_IN2, LOW);
-  digitalWrite(MOTOR_RIGHT_IN3, LOW);
-  digitalWrite(MOTOR_RIGHT_IN4, LOW);
-  digitalWrite(MOTOR_ENABLE_A, LOW);
-  digitalWrite(MOTOR_ENABLE_B, LOW);
-
-  isMotorActive = false;
-  Serial.println("[MOTORS] Initialized safely in STOPPED state.");
+void applyMotorPwm(int speedPwm) {
+  currentMotorSpeed = constrain(speedPwm, 80, 255);
+  #if defined(ESP_ARDUINO_VERSION) && ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcWrite(MOTOR_ENABLE_A, currentMotorSpeed);
+    ledcWrite(MOTOR_ENABLE_B, currentMotorSpeed);
+  #else
+    ledcWrite(PWM_CH_LEFT, currentMotorSpeed);
+    ledcWrite(PWM_CH_RIGHT, currentMotorSpeed);
+  #endif
 }
 
 void stopMotors() {
@@ -177,67 +208,91 @@ void stopMotors() {
   digitalWrite(MOTOR_LEFT_IN2, LOW);
   digitalWrite(MOTOR_RIGHT_IN3, LOW);
   digitalWrite(MOTOR_RIGHT_IN4, LOW);
-  digitalWrite(MOTOR_ENABLE_A, LOW);
-  digitalWrite(MOTOR_ENABLE_B, LOW);
+  
+  #if defined(ESP_ARDUINO_VERSION) && ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcWrite(MOTOR_ENABLE_A, 0);
+    ledcWrite(MOTOR_ENABLE_B, 0);
+  #else
+    ledcWrite(PWM_CH_LEFT, 0);
+    ledcWrite(PWM_CH_RIGHT, 0);
+  #endif
+
   isMotorActive = false;
-  digitalWrite(STATUS_LED_PIN, LOW);
-  Serial.println("[MOTORS] STOPPED.");
+  digitalWrite(STATUS_LED_PIN, ledState ? HIGH : LOW);
+  Serial.println("[MOTORS] All 4 DC motors STOPPED.");
 }
 
 void moveForward(int durationMs) {
-  digitalWrite(MOTOR_ENABLE_A, HIGH);
-  digitalWrite(MOTOR_ENABLE_B, HIGH);
+  if (emergencyStopActive) return;
+  applyMotorPwm(currentMotorSpeed);
   digitalWrite(MOTOR_LEFT_IN1, HIGH);
   digitalWrite(MOTOR_LEFT_IN2, LOW);
   digitalWrite(MOTOR_RIGHT_IN3, HIGH);
   digitalWrite(MOTOR_RIGHT_IN4, LOW);
 
   isMotorActive = true;
-  motorCutoffTimestamp = millis() + durationMs;
+  int safeDuration = constrain(durationMs, 100, (int)SAFETY_WATCHDOG_MS);
+  motorCutoffTime = millis() + safeDuration;
   digitalWrite(STATUS_LED_PIN, HIGH);
-  Serial.printf("[MOTORS] FORWARD (%d ms)\n", durationMs);
+  Serial.printf("[MOTORS] FORWARD (Speed: %d, Duration: %d ms)\n", currentMotorSpeed, safeDuration);
 }
 
 void moveBackward(int durationMs) {
-  digitalWrite(MOTOR_ENABLE_A, HIGH);
-  digitalWrite(MOTOR_ENABLE_B, HIGH);
+  if (emergencyStopActive) return;
+  applyMotorPwm(currentMotorSpeed);
   digitalWrite(MOTOR_LEFT_IN1, LOW);
   digitalWrite(MOTOR_LEFT_IN2, HIGH);
   digitalWrite(MOTOR_RIGHT_IN3, LOW);
   digitalWrite(MOTOR_RIGHT_IN4, HIGH);
 
   isMotorActive = true;
-  motorCutoffTimestamp = millis() + durationMs;
+  int safeDuration = constrain(durationMs, 100, (int)SAFETY_WATCHDOG_MS);
+  motorCutoffTime = millis() + safeDuration;
   digitalWrite(STATUS_LED_PIN, HIGH);
-  Serial.printf("[MOTORS] BACKWARD (%d ms)\n", durationMs);
+  Serial.printf("[MOTORS] BACKWARD (Speed: %d, Duration: %d ms)\n", currentMotorSpeed, safeDuration);
 }
 
 void turnLeft(int durationMs) {
-  digitalWrite(MOTOR_ENABLE_A, HIGH);
-  digitalWrite(MOTOR_ENABLE_B, HIGH);
+  if (emergencyStopActive) return;
+  applyMotorPwm(currentMotorSpeed);
   digitalWrite(MOTOR_LEFT_IN1, LOW);
   digitalWrite(MOTOR_LEFT_IN2, HIGH);
   digitalWrite(MOTOR_RIGHT_IN3, HIGH);
   digitalWrite(MOTOR_RIGHT_IN4, LOW);
 
   isMotorActive = true;
-  motorCutoffTimestamp = millis() + durationMs;
+  int safeDuration = constrain(durationMs, 100, (int)SAFETY_WATCHDOG_MS);
+  motorCutoffTime = millis() + safeDuration;
   digitalWrite(STATUS_LED_PIN, HIGH);
-  Serial.printf("[MOTORS] TURN LEFT (%d ms)\n", durationMs);
+  Serial.printf("[MOTORS] TURN LEFT (Speed: %d, Duration: %d ms)\n", currentMotorSpeed, safeDuration);
 }
 
 void turnRight(int durationMs) {
-  digitalWrite(MOTOR_ENABLE_A, HIGH);
-  digitalWrite(MOTOR_ENABLE_B, HIGH);
+  if (emergencyStopActive) return;
+  applyMotorPwm(currentMotorSpeed);
   digitalWrite(MOTOR_LEFT_IN1, HIGH);
   digitalWrite(MOTOR_LEFT_IN2, LOW);
   digitalWrite(MOTOR_RIGHT_IN3, LOW);
   digitalWrite(MOTOR_RIGHT_IN4, HIGH);
 
   isMotorActive = true;
-  motorCutoffTimestamp = millis() + durationMs;
+  int safeDuration = constrain(durationMs, 100, (int)SAFETY_WATCHDOG_MS);
+  motorCutoffTime = millis() + safeDuration;
   digitalWrite(STATUS_LED_PIN, HIGH);
-  Serial.printf("[MOTORS] TURN RIGHT (%d ms)\n", durationMs);
+  Serial.printf("[MOTORS] TURN RIGHT (Speed: %d, Duration: %d ms)\n", currentMotorSpeed, safeDuration);
+}
+
+void emergencyStop() {
+  emergencyStopActive = true;
+  stopMotors();
+  Serial.println("[EMERGENCY STOP] Triggered! Rover halted. Send STOP or clear to reset.");
+}
+
+void checkMotorWatchdog() {
+  if (isMotorActive && (millis() >= motorCutoffTime)) {
+    stopMotors();
+    Serial.println("[WATCHDOG] Timed out: Motors halted automatically for crop safety.");
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -245,11 +300,9 @@ void turnRight(int durationMs) {
 // ----------------------------------------------------------------------------
 float readBatteryPercentage() {
   int rawAdc = analogRead(BATTERY_PIN);
-  float voltage = (rawAdc / 4095.0f) * 3.3f * 2.0f;
+  float voltage = (rawAdc / 4095.0f) * 3.3f * 2.0f; // 2:1 divider factor
   float percent = (voltage - 3.2f) / (4.2f - 3.2f) * 100.0f;
-  if (percent < 0.0f) percent = 0.0f;
-  if (percent > 100.0f) percent = 100.0f;
-  return percent;
+  return constrain(percent, 0.0f, 100.0f);
 }
 
 void sendTelemetry() {
@@ -263,23 +316,27 @@ void sendTelemetry() {
   float batteryPercent = readBatteryPercentage();
 
   StaticJsonDocument<384> doc;
-  doc["deviceId"]        = DEVICE_ID;
-  doc["farmId"]          = FARM_ID;
-  doc["plotId"]          = PLOT_ID;
+  doc["device_id"]        = DEVICE_ID;
+  doc["deviceId"]         = DEVICE_ID;
+  doc["farm_id"]          = FARM_ID;
+  doc["plot_id"]          = PLOT_ID;
 
   if (!isnan(temp)) {
-    doc["temperature"]   = round(temp * 10.0f) / 10.0f;
-    doc["temperature_c"] = round(temp * 10.0f) / 10.0f;
+    doc["temperature"]    = round(temp * 10.0f) / 10.0f;
+    doc["temperature_c"]  = round(temp * 10.0f) / 10.0f;
   }
   if (!isnan(hum)) {
-    doc["humidity"]      = round(hum * 10.0f) / 10.0f;
+    doc["humidity"]       = round(hum * 10.0f) / 10.0f;
     doc["humidity_percent"] = round(hum * 10.0f) / 10.0f;
   }
 
-  doc["rawMoistureAdc"]   = rawMoistureAdc;
+  // Two-point moisture estimate (Dry ~3200, Wet ~1400)
+  float soilMoistureEst = ((3200.0f - rawMoistureAdc) / (3200.0f - 1400.0f)) * 100.0f;
+  doc["soil_moisture"]    = constrain(round(soilMoistureEst * 10.0f) / 10.0f, 0.0f, 100.0f);
+  doc["soil_ph"]          = round((7.0f - (rawPhVoltage - 2.5f) * 3.5f) * 10.0f) / 10.0f;
   doc["raw_moisture_adc"] = rawMoistureAdc;
-  doc["rawPhVoltage"]     = round(rawPhVoltage * 100.0f) / 100.0f;
   doc["raw_ph_voltage"]   = round(rawPhVoltage * 100.0f) / 100.0f;
+  doc["battery"]          = round(batteryPercent);
   doc["battery_percent"]  = round(batteryPercent);
   doc["signal_rssi"]      = WiFi.RSSI();
   doc["is_simulated"]     = false;
@@ -287,15 +344,32 @@ void sendTelemetry() {
   String jsonString;
   serializeJson(doc, jsonString);
 
-  mqttClient.publish(TOPIC_TELEMETRY.c_str(), jsonString.c_str());
-  Serial.printf("[TELEMETRY] Temp=%.1fC, Hum=%.1f%%, MoistureADC=%d, pH_V=%.2fV\n",
-                temp, hum, rawMoistureAdc, rawPhVoltage);
+  // Publish to device topic + standard rover topics
+  mqttClient.publish(TOPIC_TELEMETRY_DEVICE.c_str(), jsonString.c_str());
+  mqttClient.publish(TOPIC_ROVER_SENSORS_DATA, jsonString.c_str());
+  mqttClient.publish(TOPIC_ROVER_STATUS_TELEM, jsonString.c_str());
+
+  // Individual temperature & humidity streams
+  if (!isnan(temp)) {
+    char tBuf[32];
+    snprintf(tBuf, sizeof(tBuf), "{\"temperature\":%.1f}", temp);
+    mqttClient.publish(TOPIC_ROVER_SENSORS_TEMP, tBuf);
+  }
+  if (!isnan(hum)) {
+    char hBuf[32];
+    snprintf(hBuf, sizeof(hBuf), "{\"humidity\":%.1f}", hum);
+    mqttClient.publish(TOPIC_ROVER_SENSORS_HUM, hBuf);
+  }
+
+  Serial.printf("[TELEMETRY] Temp=%.1fC | Hum=%.1f%% | MoistureADC=%d | pH_V=%.2fV | Batt=%.0f%%\n",
+                temp, hum, rawMoistureAdc, rawPhVoltage, batteryPercent);
 }
 
 void sendRoverStatus(bool isOnline) {
   if (!mqttClient.connected()) return;
 
   StaticJsonDocument<256> doc;
+  doc["device_id"]       = DEVICE_ID;
   doc["deviceId"]        = DEVICE_ID;
   doc["is_online"]       = isOnline;
   doc["status"]          = isOnline ? "online" : "offline";
@@ -303,12 +377,15 @@ void sendRoverStatus(bool isOnline) {
   doc["signal_rssi"]     = WiFi.RSSI();
   doc["ip_address"]      = WiFi.localIP().toString();
   doc["mode"]            = "MANUAL";
+  doc["speed_pwm"]       = currentMotorSpeed;
 
   String jsonString;
   serializeJson(doc, jsonString);
 
-  mqttClient.publish(TOPIC_STATUS.c_str(), jsonString.c_str(), true);
-  Serial.printf("[STATUS] is_online=%s (IP: %s)\n", isOnline ? "true" : "false", WiFi.localIP().toString().c_str());
+  mqttClient.publish(TOPIC_STATUS_DEVICE.c_str(), jsonString.c_str(), true);
+  mqttClient.publish(TOPIC_ROVER_STATUS_CONN, jsonString.c_str(), true);
+
+  Serial.printf("[STATUS] Status update: %s (IP: %s)\n", isOnline ? "ONLINE" : "OFFLINE", WiFi.localIP().toString().c_str());
 }
 
 void sendAcknowledgement(const char* commandId, const char* statusStr, const char* messageStr) {
@@ -316,15 +393,18 @@ void sendAcknowledgement(const char* commandId, const char* statusStr, const cha
 
   StaticJsonDocument<256> doc;
   doc["commandId"] = commandId;
+  doc["command_id"] = commandId;
   doc["deviceId"]  = DEVICE_ID;
+  doc["device_id"] = DEVICE_ID;
   doc["status"]    = statusStr;
   doc["message"]   = messageStr;
 
   String jsonString;
   serializeJson(doc, jsonString);
 
-  mqttClient.publish(TOPIC_ACK.c_str(), jsonString.c_str());
-  Serial.printf("[ACK] Published execution ack for #%s -> Status: %s\n", commandId, statusStr);
+  mqttClient.publish(TOPIC_ACK_DEVICE.c_str(), jsonString.c_str());
+  mqttClient.publish(TOPIC_ROVER_COMMANDS_ACK, jsonString.c_str());
+  Serial.printf("[ACK] Published execution ack #%s: %s (%s)\n", commandId, statusStr, messageStr);
 }
 
 // ----------------------------------------------------------------------------
@@ -343,94 +423,116 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
   const char* cmdId = doc["commandId"] | doc["command_id"] | "cmd-unknown";
   
-  // Extract command from "value", "type", or "command"
   String action = "";
-  if (doc.containsKey("value") && doc["value"].is<const char*>()) {
+  if (doc.containsKey("command") && doc["command"].is<const char*>()) {
+    action = String(doc["command"].as<const char*>());
+  } else if (doc.containsKey("value") && doc["value"].is<const char*>()) {
     action = String(doc["value"].as<const char*>());
   } else if (doc.containsKey("type") && String(doc["type"].as<const char*>()) != "MOTOR_CONTROL") {
     action = String(doc["type"].as<const char*>());
-  } else if (doc.containsKey("command")) {
-    action = String(doc["command"].as<const char*>());
   }
 
-  int durationMs = doc["durationMs"] | doc["duration_ms"] | 1000;
   action.toUpperCase();
+  int durationMs = doc["durationMs"] | doc["duration_ms"] | 1000;
 
-  Serial.printf("[COMMAND] ID: %s | Action: %s | Duration: %d ms\n", cmdId, action.c_str(), durationMs);
+  Serial.printf("[COMMAND] Action: %s | Duration: %d ms | ID: %s\n", action.c_str(), durationMs, cmdId);
 
+  // Command Execution Dispatcher
   if (action == "FORWARD") {
+    emergencyStopActive = false;
     moveForward(durationMs);
-    sendAcknowledgement(cmdId, "executed", "Motors moved FORWARD successfully");
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "Motors moving FORWARD");
   } else if (action == "BACKWARD") {
+    emergencyStopActive = false;
     moveBackward(durationMs);
-    sendAcknowledgement(cmdId, "executed", "Motors moved BACKWARD successfully");
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "Motors moving BACKWARD");
   } else if (action == "LEFT") {
+    emergencyStopActive = false;
     turnLeft(durationMs);
-    sendAcknowledgement(cmdId, "executed", "Rover turned LEFT successfully");
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "Motors turning LEFT");
   } else if (action == "RIGHT") {
+    emergencyStopActive = false;
     turnRight(durationMs);
-    sendAcknowledgement(cmdId, "executed", "Rover turned RIGHT successfully");
-  } else if (action == "STOP" || action == "EMERGENCY_STOP") {
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "Motors turning RIGHT");
+  } else if (action == "STOP") {
+    emergencyStopActive = false;
     stopMotors();
-    sendAcknowledgement(cmdId, "executed", "Motors EMERGENCY STOPPED");
-  } else if (action == "LED_SET" || String(doc["type"].as<const char*>()) == "LED_SET") {
-    bool ledVal = doc["value"] | true;
-    digitalWrite(STATUS_LED_PIN, ledVal ? HIGH : LOW);
-    sendAcknowledgement(cmdId, "executed", ledVal ? "Auxiliary LED ON" : "Auxiliary LED OFF");
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "Motors STOPPED");
+  } else if (action == "EMERGENCY_STOP") {
+    emergencyStop();
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "EMERGENCY STOP engaged");
+  } else if (action == "SPEED_SET") {
+    int speedVal = doc["value"] | doc["speed"] | 220;
+    applyMotorPwm(speedVal);
+    char sMsg[64];
+    snprintf(sMsg, sizeof(sMsg), "Motor PWM speed set to %d", currentMotorSpeed);
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", sMsg);
+  } else if (action == "LED_SET") {
+    int val = doc["value"] | 0;
+    ledState = (val > 0);
+    digitalWrite(STATUS_LED_PIN, ledState ? HIGH : LOW);
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", ledState ? "Headlight ON" : "Headlight OFF");
+  } else if (action == "CAPTURE") {
+    // Pulse camera hardware trigger line for ESP32-S3-CAM
+    digitalWrite(CAMERA_TRIGGER_PIN, HIGH);
+    delay(50);
+    digitalWrite(CAMERA_TRIGGER_PIN, LOW);
+    sendAcknowledgement(cmdId, "ACKNOWLEDGED", "Hardware capture trigger line pulsed to ESP32-S3-CAM");
   } else {
-    Serial.printf("[COMMAND] Unrecognized instruction: %s\n", action.c_str());
-    sendAcknowledgement(cmdId, "failed", "Unrecognized hardware instruction");
+    Serial.printf("[COMMAND WARNING] Unknown command action: %s\n", action.c_str());
   }
 }
 
 // ----------------------------------------------------------------------------
-// 7. WI-FI & SECURE TLS MQTT CONNECTION (WITH LWT)
+// 7. WI-FI & MQTT TLS CONNECTION MANAGEMENT
 // ----------------------------------------------------------------------------
-void connectWifi() {
+void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
 
-  Serial.printf("[WIFI] Connecting to SSID: %s ", WIFI_SSID);
+  Serial.printf("\n[WIFI] Connecting to SSID: %s ", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  int retries = 0;
-  while (WiFi.status() != WL_CONNECTED && retries < 25) {
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
     delay(500);
     Serial.print(".");
-    retries++;
+    digitalWrite(STATUS_LED_PIN, !digitalRead(STATUS_LED_PIN));
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n[WIFI] Connected successfully!");
-    Serial.printf("[WIFI] IP Address: %s\n", WiFi.localIP().toString().c_str());
+    digitalWrite(STATUS_LED_PIN, LOW);
+    Serial.printf("\n[WIFI] Connected! Assigned IP: %s | RSSI: %d dBm\n",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
   } else {
-    Serial.println("\n[WIFI] Connection timed out. Running offline.");
+    Serial.println("\n[WIFI WARNING] Connection timed out. Running offline mode.");
   }
 }
 
 boolean connectMQTT() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
-  Serial.printf("[MQTT TLS] Connecting to %s:%d ...\n", MQTT_BROKER, MQTT_PORT);
+  Serial.printf("[MQTT TLS] Connecting to broker: %s:%d as user: '%s' ...\n", MQTT_BROKER, MQTT_PORT, MQTT_USER);
 
-  // Configure DigiCert CA Certificate for TLS validation
+  // Apply verified DigiCert Global Root G2 certificate
   espClient.setCACert(EMQX_CA_CERT);
 
-  // LWT payload for unexpected disconnection
+  // Last Will and Testament (LWT) for unexpected disconnect detection
   StaticJsonDocument<128> lwtDoc;
   lwtDoc["deviceId"]  = DEVICE_ID;
+  lwtDoc["device_id"] = DEVICE_ID;
   lwtDoc["is_online"] = false;
   lwtDoc["status"]    = "offline";
   String lwtPayload;
   serializeJson(lwtDoc, lwtPayload);
 
-  String clientId = "ESP32-" + String(DEVICE_ID) + "-" + String(random(0xffff), HEX);
+  String clientId = "ESP32-Rover-" + String(DEVICE_ID) + "-" + String(random(0xffff), HEX);
 
   boolean connected = mqttClient.connect(
     clientId.c_str(),
     MQTT_USER,
     MQTT_PASS,
-    TOPIC_STATUS.c_str(),
+    TOPIC_STATUS_DEVICE.c_str(),
     1,
     true,
     lwtPayload.c_str()
@@ -438,15 +540,19 @@ boolean connectMQTT() {
 
   if (connected) {
     Serial.println("[MQTT TLS] Connected to EMQX Cloud successfully!");
-    mqttClient.subscribe(TOPIC_COMMAND.c_str(), 1);
-    Serial.printf("[MQTT TLS] Subscribed to: %s\n", TOPIC_COMMAND.c_str());
+
+    // Subscribe to both command channels
+    mqttClient.subscribe(TOPIC_COMMAND_DEVICE.c_str(), 1);
+    mqttClient.subscribe(TOPIC_ROVER_COMMANDS_MOTOR, 1);
+    Serial.printf("[MQTT TLS] Subscribed to:\n  -> %s\n  -> %s\n",
+                  TOPIC_COMMAND_DEVICE.c_str(), TOPIC_ROVER_COMMANDS_MOTOR);
 
     sendRoverStatus(true);
     sendTelemetry();
   } else {
-    Serial.printf("[MQTT TLS] Connection failed, state rc=%d. Will retry in 5s...\n", mqttClient.state());
+    Serial.printf("[MQTT TLS ERROR] Connection failed, rc=%d.\n", mqttClient.state());
     if (mqttClient.state() == 4 || mqttClient.state() == 5) {
-      Serial.println("[MQTT TLS] Authentication failed: Verify username ('agrirover') and password in secrets.h");
+      Serial.println("[MQTT TLS ERROR] Authentication failed: Check SECRET_MQTT_USERNAME and SECRET_MQTT_PASSWORD.");
     }
   }
 
@@ -460,61 +566,88 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("\n========================================================");
-  Serial.println("  🌱 AGRIROVER — ESP32 TLS EMQX CLOUD FIRMWARE         ");
-  Serial.println("========================================================");
+  Serial.println("\n" + String('=', 65));
+  Serial.println("🌱 AGRIROVER MAIN ESP32DevKit V1 FIRMWARE INITIALIZING");
+  Serial.println(String('=', 65));
 
+  // Initialize GPIO pins
   pinMode(STATUS_LED_PIN, OUTPUT);
+  pinMode(CAMERA_TRIGGER_PIN, OUTPUT);
   digitalWrite(STATUS_LED_PIN, LOW);
+  digitalWrite(CAMERA_TRIGGER_PIN, LOW);
 
-  setupMotors();
+  pinMode(MOTOR_LEFT_IN1, OUTPUT);
+  pinMode(MOTOR_LEFT_IN2, OUTPUT);
+  pinMode(MOTOR_RIGHT_IN3, OUTPUT);
+  pinMode(MOTOR_RIGHT_IN4, OUTPUT);
+  pinMode(SOIL_MOISTURE_PIN, INPUT);
+  pinMode(SOIL_PH_PIN, INPUT);
+  pinMode(BATTERY_PIN, INPUT);
+
+  // Setup PWM Channels for Motor Speed Control
+  #if defined(ESP_ARDUINO_VERSION) && ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    ledcAttach(MOTOR_ENABLE_A, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttach(MOTOR_ENABLE_B, PWM_FREQ, PWM_RESOLUTION);
+  #else
+    ledcSetup(PWM_CH_LEFT, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CH_RIGHT, PWM_FREQ, PWM_RESOLUTION);
+    ledcAttachPin(MOTOR_ENABLE_A, PWM_CH_LEFT);
+    ledcAttachPin(MOTOR_ENABLE_B, PWM_CH_RIGHT);
+  #endif
+
+  stopMotors();
+
+  // Initialize DHT22 Sensor
   dht.begin();
-  analogReadResolution(12);
+  Serial.println("[SENSORS] DHT22 Temperature & Humidity initialized on GPIO 4.");
 
-  TOPIC_COMMAND   = "devices/" + String(DEVICE_ID) + "/command";
-  TOPIC_TELEMETRY = "devices/" + String(DEVICE_ID) + "/telemetry";
-  TOPIC_STATUS    = "devices/" + String(DEVICE_ID) + "/status";
-  TOPIC_ACK       = "devices/" + String(DEVICE_ID) + "/ack";
+  // Build topic strings
+  TOPIC_COMMAND_DEVICE   = "devices/" + String(DEVICE_ID) + "/command";
+  TOPIC_TELEMETRY_DEVICE = "devices/" + String(DEVICE_ID) + "/telemetry";
+  TOPIC_STATUS_DEVICE    = "devices/" + String(DEVICE_ID) + "/status";
+  TOPIC_ACK_DEVICE       = "devices/" + String(DEVICE_ID) + "/ack";
 
+  // Setup MQTT Client
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(onMqttMessage);
-  mqttClient.setBufferSize(1024);
+  mqttClient.setBufferSize(768); // Support full telemetry & command packets
 
-  connectWifi();
-  if (WiFi.status() == WL_CONNECTED) {
-    connectMQTT();
-  }
+  // Connect Wi-Fi & MQTT
+  connectWiFi();
+  connectMQTT();
+
+  Serial.println("[SYSTEM] AgriRover ESP32 firmware running. Ready for cloud teleoperation.\n");
 }
 
 void loop() {
-  if (isMotorActive && millis() >= motorCutoffTimestamp) {
-    stopMotors();
-  }
-
+  // 1. Maintain Wi-Fi Connection
   if (WiFi.status() != WL_CONNECTED) {
-    if (millis() - lastReconnectAttempt >= 10000) {
-      lastReconnectAttempt = millis();
-      connectWifi();
-    }
-    return;
-  }
-
-  if (!mqttClient.connected()) {
-    if (millis() - lastReconnectAttempt >= 5000) {
-      lastReconnectAttempt = millis();
-      if (connectMQTT()) {
-        lastReconnectAttempt = 0;
-      }
+    if (millis() - lastWifiCheckTime >= 10000) {
+      lastWifiCheckTime = millis();
+      connectWiFi();
     }
   } else {
-    mqttClient.loop();
+    // 2. Maintain MQTT TLS Connection
+    if (!mqttClient.connected()) {
+      if (millis() - lastMqttRetryTime >= 5000) {
+        lastMqttRetryTime = millis();
+        connectMQTT();
+      }
+    } else {
+      mqttClient.loop();
+    }
   }
 
+  // 3. Safety Watchdog - Auto-stop motors on timeout
+  checkMotorWatchdog();
+
+  // 4. Periodic Telemetry Stream
   if (millis() - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
     lastTelemetryTime = millis();
     sendTelemetry();
   }
 
+  // 5. Periodic Status / Heartbeat
   if (millis() - lastStatusTime >= STATUS_INTERVAL_MS) {
     lastStatusTime = millis();
     sendRoverStatus(true);

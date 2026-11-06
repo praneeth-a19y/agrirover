@@ -9,7 +9,7 @@ function setMqttService(service) {
   mqttService = service;
 }
 
-const VALID_COMMANDS = ['FORWARD', 'BACKWARD', 'LEFT', 'RIGHT', 'STOP', 'EMERGENCY_STOP', 'LED_SET'];
+const VALID_COMMANDS = ['FORWARD', 'BACKWARD', 'LEFT', 'RIGHT', 'STOP', 'EMERGENCY_STOP', 'LED_SET', 'CAPTURE', 'SPEED_SET'];
 
 function getRoverStatus(deviceId = config.defaultDeviceId) {
   let rover = db.prepare('SELECT * FROM rover_status WHERE device_id = ?').get(deviceId);

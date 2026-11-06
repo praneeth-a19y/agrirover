@@ -48,4 +48,6 @@ backend/static/uploads/*.jpeg
 
 # Hardware secrets & private credentials
 secrets.h
+*/secrets.h
+**/secrets.h
 hardware/**/secrets.h

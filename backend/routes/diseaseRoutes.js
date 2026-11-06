@@ -22,10 +22,27 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
 });
 
-router.post('/predict', upload.single('file'), diseaseController.predict);
+// Middleware that accepts any file field name (image, file, photo)
+const uploadAnyImage = (req, res, next) => {
+  upload.any()(req, res, (err) => {
+    if (err) return next(err);
+    if (req.files && req.files.length > 0) {
+      req.file = req.files[0];
+    }
+    next();
+  });
+};
+
+router.post('/detect', uploadAnyImage, diseaseController.predict);
+router.post('/predict', uploadAnyImage, diseaseController.predict);
+router.post('/upload', uploadAnyImage, (req, res, next) => {
+  req.body.source = req.body.source || 'esp32_cam';
+  diseaseController.predict(req, res, next);
+});
+
 router.get('/scans', diseaseController.getScans);
 router.get('/scans/:id', diseaseController.getScanDetail);
 router.get('/model-status', diseaseController.getModelStatus);
@@ -34,4 +51,5 @@ router.get('/latest-capture', diseaseController.getLatestCapture);
 module.exports = {
   router,
   upload,
+  uploadAnyImage,
 };

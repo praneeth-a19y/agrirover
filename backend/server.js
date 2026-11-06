@@ -11,7 +11,7 @@ const { securityHeaders } = require('./middleware/security');
 const errorHandler = require('./middleware/errorHandler');
 
 const apiRoutes = require('./routes/apiRoutes');
-const { upload } = require('./routes/diseaseRoutes');
+const { upload, uploadAnyImage } = require('./routes/diseaseRoutes');
 const diseaseController = require('./controllers/diseaseController');
 
 const { initSocketIO } = require('./services/socketService');
@@ -60,10 +60,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.post('/predict', upload.single('file'), diseaseController.predict);
-app.post('/upload', upload.single('image'), (req, res, next) => {
-  req.file = req.file || req.files?.image;
-  req.body.source = 'esp32_cam';
+app.post('/predict', uploadAnyImage, diseaseController.predict);
+app.post('/upload', uploadAnyImage, (req, res, next) => {
+  req.body.source = req.body.source || 'esp32_cam';
   diseaseController.predict(req, res, next);
 });
 

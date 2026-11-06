@@ -92,4 +92,22 @@ export const socketService = {
       s.off('rover_alert', handler);
     };
   },
+
+  onDiseaseScan: (callback: (prediction: any) => void): (() => void) => {
+    const s = getSocket();
+    const handler = (data: any) => callback(data);
+    s.on('disease_scan', handler);
+    return () => {
+      s.off('disease_scan', handler);
+    };
+  },
+
+  onCameraCapture: (callback: (capture: any) => void): (() => void) => {
+    const s = getSocket();
+    const handler = (data: any) => callback(data);
+    s.on('camera_capture', handler);
+    return () => {
+      s.off('camera_capture', handler);
+    };
+  },
 };

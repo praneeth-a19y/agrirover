@@ -216,12 +216,20 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
   const plotId = metadata.plot_id || 'plot-001';
   const rowId = metadata.row_id || 'Row-A';
 
+  let imageBase64 = null;
+  if (file && file.path && fs.existsSync(file.path)) {
+    try {
+      const buffer = fs.readFileSync(file.path);
+      imageBase64 = `data:${file.mimetype || 'image/jpeg'};base64,${buffer.toString('base64')}`;
+    } catch {}
+  }
+
   const insertStmt = db.prepare(`
     INSERT INTO disease_scans (
-      id, device_id, farm_id, plot_id, row_id, image_url, original_filename,
+      id, device_id, farm_id, plot_id, row_id, image_url, image_base64, original_filename,
       predicted_class, confidence, severity, symptoms, recommendations,
       is_healthy, inference_mode, model_version, is_demo, timestamp
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   insertStmt.run(
@@ -231,6 +239,7 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
     plotId,
     rowId,
     imageUrl,
+    imageBase64,
     filename,
     predictedClass,
     confidence,
@@ -273,6 +282,7 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
   latestCapture = {
     has_image: true,
     image_url: imageUrl,
+    image_base64: imageBase64,
     scan_id: scanId,
     prediction,
     timestamp: now,
@@ -280,6 +290,20 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
   };
 
   logger.info('ML', `Leaf scan diagnosed: ${predictedClass} (${(confidence * 100).toFixed(1)}%)`);
+
+  try {
+    const socketService = require('./socketService');
+    socketService.broadcast('disease_scan', prediction);
+    socketService.broadcast('camera_capture', latestCapture);
+  } catch {}
+
+  try {
+    const mqttService = require('./mqttService');
+    if (mqttService && mqttService.publishAiResult) {
+      mqttService.publishAiResult(prediction);
+    }
+  } catch {}
+
   return prediction;
 }
 
@@ -305,11 +329,22 @@ function getDiseaseScans({ plotId, isHealthy, limit = 50 }) {
   params.push(parseInt(limit, 10));
 
   const rows = db.prepare(query).all(...params);
-  return rows.map((r) => ({
-    ...r,
-    is_healthy: Boolean(r.is_healthy),
-    is_demo: Boolean(r.is_demo),
-  }));
+  return rows.map((r) => {
+    // If static file is absent on ephemeral Render filesystem, fall back to base64
+    let effectiveUrl = r.image_url;
+    if (r.image_base64 && r.image_url && r.image_url.startsWith('/static/uploads/')) {
+      const localFile = path.resolve(__dirname, '..', r.image_url.replace(/^\//, ''));
+      if (!fs.existsSync(localFile)) {
+        effectiveUrl = r.image_base64;
+      }
+    }
+    return {
+      ...r,
+      image_url: effectiveUrl,
+      is_healthy: Boolean(r.is_healthy),
+      is_demo: Boolean(r.is_demo),
+    };
+  });
 }
 
 function getDiseaseScanDetail(scanId) {
