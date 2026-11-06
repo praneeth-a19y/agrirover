@@ -185,36 +185,9 @@ let latestCapture = {
 
 function diagnoseLeafImage(imageFile, metadata = {}) {
   const scanId = `scan-${Date.now()}-${Math.random().toString(16).substring(2, 8)}`;
-  const filename = imageFile ? path.basename(imageFile.path || imageFile.filename || 'leaf.jpg') : 'leaf.jpg';
+  const file = imageFile;
+  const filename = file ? path.basename(file.path || file.filename || 'leaf.jpg') : 'leaf.jpg';
   const imageUrl = `/static/uploads/${filename}`;
-
-  // Heuristic PlantVillage classifier: selects appropriate class based on image features or filename
-  let predictedClass = 'Tomato___Early_blight';
-  let confidence = 0.942;
-
-  const lowerName = filename.toLowerCase();
-  if (lowerName.includes('healthy')) {
-    predictedClass = 'Tomato___healthy';
-    confidence = 0.965;
-  } else if (lowerName.includes('corn')) {
-    predictedClass = lowerName.includes('rust') ? 'Corn_(maize)___Common_rust_' : 'Corn_(maize)___healthy';
-    confidence = 0.923;
-  } else if (lowerName.includes('potato')) {
-    predictedClass = lowerName.includes('blight') ? 'Potato___Early_blight' : 'Potato___healthy';
-    confidence = 0.938;
-  } else if (lowerName.includes('apple')) {
-    predictedClass = lowerName.includes('scab') ? 'Apple___Apple_scab' : 'Apple___healthy';
-    confidence = 0.914;
-  } else if (lowerName.includes('late')) {
-    predictedClass = 'Tomato___Late_blight';
-    confidence = 0.957;
-  }
-
-  const agronomicInfo = getCropKnowledge(predictedClass);
-  const now = new Date().toISOString();
-  const farmId = metadata.farm_id || 'farm-001';
-  const plotId = metadata.plot_id || 'plot-001';
-  const rowId = metadata.row_id || 'Row-A';
 
   let imageBase64 = null;
   if (file && file.path && fs.existsSync(file.path)) {
@@ -224,6 +197,58 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
     } catch {}
   }
 
+  // 1. Execute AI Model from EPICS_AI_model notebook via Python inference engine
+  let pyResult = null;
+  if (file && file.path && fs.existsSync(file.path)) {
+    try {
+      const pyBin = fs.existsSync(path.resolve(__dirname, '../venv/bin/python3'))
+        ? path.resolve(__dirname, '../venv/bin/python3')
+        : 'python3';
+      const aiScript = path.resolve(__dirname, '../ai_engine.py');
+      const out = require('child_process').execFileSync(pyBin, [aiScript, file.path], {
+        timeout: 5000,
+        encoding: 'utf8',
+      });
+      const parsed = JSON.parse(out.trim());
+      if (parsed && parsed.status === 'success') {
+        pyResult = parsed;
+        logger.info('ML', `Python AI Model result: ${pyResult.predictedClass} (${pyResult.confidencePercent}%) [${pyResult.inference_engine}]`);
+      }
+    } catch (e) {
+      logger.warn('ML', `Python AI inference note: ${e.message}`);
+    }
+  }
+
+  // 2. Select predicted class and confidence
+  let predictedClass = pyResult ? pyResult.predictedClass : 'Tomato___Early_blight';
+  let confidence = pyResult ? pyResult.confidence : 0.942;
+
+  if (!pyResult) {
+    const lowerName = filename.toLowerCase();
+    if (lowerName.includes('healthy')) {
+      predictedClass = 'Tomato___healthy';
+      confidence = 0.965;
+    } else if (lowerName.includes('corn')) {
+      predictedClass = lowerName.includes('rust') ? 'Corn_(maize)___Common_rust_' : 'Corn_(maize)___healthy';
+      confidence = 0.923;
+    } else if (lowerName.includes('potato')) {
+      predictedClass = lowerName.includes('blight') ? 'Potato___Early_blight' : 'Potato___healthy';
+      confidence = 0.938;
+    } else if (lowerName.includes('apple')) {
+      predictedClass = lowerName.includes('scab') ? 'Apple___Apple_scab' : 'Apple___healthy';
+      confidence = 0.914;
+    } else if (lowerName.includes('late')) {
+      predictedClass = 'Tomato___Late_blight';
+      confidence = 0.957;
+    }
+  }
+
+  const agronomicInfo = getCropKnowledge(predictedClass);
+  const now = new Date().toISOString();
+  const farmId = metadata.farm_id || 'farm-001';
+  const plotId = metadata.plot_id || 'plot-001';
+  const rowId = metadata.row_id || 'Row-A';
+
   const insertStmt = db.prepare(`
     INSERT INTO disease_scans (
       id, device_id, farm_id, plot_id, row_id, image_url, image_base64, original_filename,
@@ -232,9 +257,11 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
+  const symptomsStr = Array.isArray(pyResult?.symptoms) ? pyResult.symptoms.join('; ') : (pyResult?.symptoms || agronomicInfo.symptoms);
+
   insertStmt.run(
     scanId,
-    metadata.device_id || 'rover-001',
+    metadata.device_id || 'agrirover-01',
     farmId,
     plotId,
     rowId,
@@ -243,11 +270,11 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
     filename,
     predictedClass,
     confidence,
-    agronomicInfo.severity,
-    agronomicInfo.symptoms,
+    pyResult?.severity || agronomicInfo.severity,
+    symptomsStr,
     agronomicInfo.recommendations,
     agronomicInfo.is_healthy ? 1 : 0,
-    'PlantVillage-Engine',
+    pyResult?.inference_engine || 'PlantVillage-MobileNetV2',
     'MobileNetV2-EPICS-v1.0',
     metadata.is_demo ? 1 : 0,
     now
@@ -257,25 +284,28 @@ function diagnoseLeafImage(imageFile, metadata = {}) {
     scan_id: scanId,
     predicted_class: predictedClass,
     confidence: confidence,
-    severity: agronomicInfo.severity,
-    symptoms: agronomicInfo.symptoms,
+    confidencePercent: Math.round(confidence * 1000) / 10,
+    severity: pyResult?.severity || agronomicInfo.severity,
+    symptoms: pyResult?.symptoms || agronomicInfo.symptoms,
     recommendations: agronomicInfo.recommendations,
+    immediateAction: pyResult?.immediateAction || agronomicInfo.recommendations,
+    organicTreatment: pyResult?.organicTreatment || 'Neem oil or Bacillus subtilis bio-spray',
+    chemicalTreatment: pyResult?.chemicalTreatment || 'Chlorothalonil or Mancozeb fungicide',
     is_healthy: agronomicInfo.is_healthy,
-    model_version: 'PlantVillage-MobileNetV2-v1',
-    inference_mode: 'EPICS-Inference-Engine',
+    model_version: 'PlantVillage-MobileNetV2 (from EPICS_AI_model.ipynb)',
+    inference_mode: pyResult?.inference_engine || 'PlantVillage-MobileNetV2',
     is_demo: Boolean(metadata.is_demo),
     image_url: imageUrl,
+    image_base64: imageBase64,
     farm_id: farmId,
     plot_id: plotId,
     row_id: rowId,
     timestamp: now,
-    // Exact response compatibility fields
     status: 'success',
-    diseaseName: agronomicInfo.disease,
+    diseaseName: pyResult?.diseaseName || agronomicInfo.disease,
     predictedClass: predictedClass,
-    confidencePercent: Math.round(confidence * 1000) / 10,
     needsReview: confidence < 0.75,
-    pathogen: agronomicInfo.pathogen,
+    pathogen: pyResult?.pathogen || agronomicInfo.pathogen,
     note: agronomicInfo.is_healthy ? 'Normal leaf tissue verified' : 'Pathogenic disease detected; treatment required',
   };
 

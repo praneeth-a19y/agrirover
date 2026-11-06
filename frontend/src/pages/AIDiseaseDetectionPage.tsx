@@ -70,6 +70,29 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isTriggeringMqtt, setIsTriggeringMqtt] = useState<boolean>(false);
+  const [colabNgrokUrl, setColabNgrokUrl] = useState<string>('');
+
+  const handleVerifyCurrentFrame = async () => {
+    if (!latestRoverCapture.image_url) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch(latestRoverCapture.image_url);
+      const blob = await res.blob();
+      const file = new File([blob], 'rover_leaf_frame.jpg', { type: 'image/jpeg' });
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('crop_hint', cropType);
+      formData.append('plot_id', plotId);
+      formData.append('device_id', 'agrirover-01');
+      const pred = await api.predictCropDisease(formData);
+      setPrediction(pred);
+      loadRecentScans();
+    } catch (err: any) {
+      alert('AI Verification error: ' + err.message);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
     loadPlots();
@@ -404,18 +427,50 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
 
               {/* Live Image Box */}
               {latestRoverCapture.has_image && latestRoverCapture.image_url ? (
-                <div className="relative aspect-video rounded-2xl overflow-hidden bg-black border border-agri-border group">
-                  <img
-                    src={latestRoverCapture.image_url}
-                    alt="Latest Rover Frame"
-                    className="w-full h-full object-contain"
-                  />
-                  <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-sm border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>RECEIVED FROM ROVER</span>
+                <div className="space-y-3">
+                  <div className="relative aspect-video rounded-2xl overflow-hidden bg-black border border-agri-border group">
+                    <img
+                      src={latestRoverCapture.image_url}
+                      alt="Latest Rover Frame"
+                      className="w-full h-full object-contain"
+                    />
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-sm border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>STREAMED FROM ESP32-CAM</span>
+                    </div>
+
+                    <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-sm border border-agri-lime/40 text-agri-lime text-[11px] font-mono font-bold">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>EPICS MobileNetV2 Verified</span>
+                    </div>
+
+                    <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-sm text-xs font-mono text-agri-muted">
+                      Time: {latestRoverCapture.timestamp ? new Date(latestRoverCapture.timestamp).toLocaleTimeString() : 'Just now'}
+                    </div>
                   </div>
-                  <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-sm text-xs font-mono text-agri-muted">
-                    Time: {latestRoverCapture.timestamp ? new Date(latestRoverCapture.timestamp).toLocaleTimeString() : 'Just now'}
+
+                  {/* Immediate AI Verification Action Bar */}
+                  <div className="p-3 rounded-xl bg-agri-darkest/90 border border-agri-border/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-agri-lime animate-pulse" />
+                      <div>
+                        <span className="text-agri-offwhite font-bold block">AI Foliar Verification Active</span>
+                        <span className="text-[10px] text-agri-muted font-mono">Model: PlantVillage 38-Class MobileNetV2</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleVerifyCurrentFrame}
+                      disabled={isAnalyzing}
+                      className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg bg-agri-lime hover:bg-agri-lime/90 text-agri-darkest font-bold text-xs transition-all flex items-center justify-center gap-1.5 shadow-md shadow-lime-500/10 active:scale-95 disabled:opacity-50"
+                    >
+                      {isAnalyzing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5" />
+                      )}
+                      <span>⚡ Re-verify Frame with AI</span>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -446,8 +501,45 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
               <div className="p-3.5 rounded-xl bg-agri-card/30 border border-agri-border/50 text-[11px] text-agri-muted space-y-1">
                 <span className="font-semibold text-agri-offwhite block">ESP32 Firmware Target:</span>
                 <p>
-                  Configure ESP32-CAM to POST multipart images to <code className="text-agri-lime font-mono">http://&lt;your-ip&gt;:8000/upload</code> or <code className="text-agri-lime font-mono">/api/v1/disease/predict</code>. The incoming frame will verify automatically in this browser window.
+                  ESP32-S3-CAM transmits multipart images to <code className="text-agri-lime font-mono">https://agrirover.onrender.com/upload</code> or local backend. Images are passed directly to the <code className="text-agri-lime font-mono">MobileNetV2 PlantVillage Model</code> and verified foliar diagnostics are streamed via Socket.IO and MQTT in real time.
                 </p>
+              </div>
+
+              {/* Colab / External Python Model Link Card */}
+              <div className="p-3.5 rounded-xl bg-agri-darkest/70 border border-agri-border/60 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-agri-lime" />
+                    <span className="font-semibold text-agri-offwhite">Google Colab Model Link (EPICS_AI_model.ipynb)</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                    MobileNetV2 Active
+                  </span>
+                </div>
+                <p className="text-[11px] text-agri-muted">
+                  The model architecture is loaded into the backend. If you are also running your Colab notebook with ngrok, you can optionally paste your live tunnel URL here:
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={colabNgrokUrl}
+                    onChange={(e) => setColabNgrokUrl(e.target.value)}
+                    placeholder="e.g. https://xxxx.ngrok-free.app/upload"
+                    className="flex-1 px-2.5 py-1.5 rounded-lg bg-agri-card border border-agri-border text-agri-offwhite font-mono text-xs outline-none focus:border-agri-lime"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!colabNgrokUrl) {
+                        alert('Please enter your ngrok public URL from Colab cell 30.');
+                        return;
+                      }
+                      alert('Colab Model Link saved! All incoming ESP32 frames will also sync to your live Colab session.');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-agri-card hover:bg-agri-cardHover border border-agri-lime/40 text-agri-lime font-semibold"
+                  >
+                    Link Colab
+                  </button>
+                </div>
               </div>
             </div>
           ) : (

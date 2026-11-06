@@ -21,6 +21,7 @@ import {
   Zap,
   Camera,
   Gauge,
+  Sparkles,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { socketService } from '../services/socketService';
@@ -46,11 +47,16 @@ export const RoverControlPage: React.FC<RoverControlPageProps> = ({
   const [ledActive, setLedActive] = useState<boolean>(false);
   const [motorSpeed, setMotorSpeed] = useState<number>(220);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [cameraCapture, setCameraCapture] = useState<any>(null);
 
   const isOnline = roverStatus?.is_online && !roverStatus?.is_stale;
 
   useEffect(() => {
     loadCommandHistory();
+    api.getLatestCapture().then((cap) => {
+      if (cap && cap.has_image) setCameraCapture(cap);
+    }).catch(() => {});
+
     const interval = setInterval(loadCommandHistory, 6000);
 
     // Real-Time Socket.IO Subscriptions
@@ -73,11 +79,18 @@ export const RoverControlPage: React.FC<RoverControlPageProps> = ({
       onRefresh();
     });
 
+    const unsubCam = socketService.onCameraCapture((cap) => {
+      if (cap && cap.has_image) {
+        setCameraCapture(cap);
+      }
+    });
+
     return () => {
       clearInterval(interval);
       unsubIssued();
       unsubAck();
       unsubStatus();
+      unsubCam();
     };
   }, []);
 
@@ -441,6 +454,61 @@ export const RoverControlPage: React.FC<RoverControlPageProps> = ({
             <div className="p-3 rounded-xl bg-agri-card/30 border border-agri-border/50 text-[10px] text-agri-muted">
               Safety rule: Motor commands time out automatically after 15s if connection is interrupted.
             </div>
+          </div>
+
+          {/* Live Camera & AI Foliar Diagnosis Card */}
+          <div className="agri-card p-5 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between border-b border-agri-border/40 pb-2.5">
+              <h3 className="text-sm font-bold text-agri-offwhite flex items-center gap-2">
+                <Camera className="w-4 h-4 text-agri-lime" />
+                <span>Camera Vision & AI Foliar Diagnosis</span>
+              </h3>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                MobileNetV2 Active
+              </span>
+            </div>
+
+            {cameraCapture && cameraCapture.has_image && cameraCapture.image_url ? (
+              <div className="space-y-2.5">
+                <div className="relative aspect-video rounded-xl overflow-hidden bg-black border border-agri-border">
+                  <img
+                    src={cameraCapture.image_url}
+                    alt="Rover Foliar Snapshot"
+                    className="w-full h-full object-contain"
+                  />
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-sm border border-emerald-500/40 text-emerald-300 text-[10px] font-mono font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>ESP32-CAM STREAM</span>
+                  </div>
+                  <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[10px] font-mono text-agri-muted">
+                    {cameraCapture.timestamp ? new Date(cameraCapture.timestamp).toLocaleTimeString() : 'Just now'}
+                  </div>
+                </div>
+
+                {cameraCapture.prediction && (
+                  <div className="p-3 rounded-xl bg-agri-darkest/90 border border-agri-border/60 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white">
+                        {cameraCapture.prediction.diseaseName || cameraCapture.prediction.predicted_class}
+                      </span>
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${cameraCapture.prediction.is_healthy ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}`}>
+                        {cameraCapture.prediction.confidencePercent ? `${cameraCapture.prediction.confidencePercent}%` : `${Math.round(cameraCapture.prediction.confidence * 100)}%`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-agri-muted">
+                      {cameraCapture.prediction.immediateAction || cameraCapture.prediction.recommendations}
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-6 rounded-xl border border-dashed border-agri-border/70 text-center bg-agri-darkest/40 space-y-2">
+                <Camera className="w-6 h-6 text-agri-muted mx-auto" />
+                <p className="text-xs text-agri-muted">
+                  No snapshot captured yet. Click <span className="text-agri-lime font-bold">Snap Photo</span> above to trigger the ESP32-S3-CAM via MQTT.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Command Audit Log */}
