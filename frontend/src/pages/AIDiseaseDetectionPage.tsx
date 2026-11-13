@@ -61,7 +61,13 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
     source: 'standby'
   });
   const [autoPollRover, setAutoPollRover] = useState<boolean>(true);
-  const [esp32Ip, setEsp32Ip] = useState<string>('192.168.1.150');
+  const [esp32Ip, setEsp32Ip] = useState<string>(() => {
+    try {
+      return localStorage.getItem('agrirover_cam_ip') || '192.168.4.3';
+    } catch {
+      return '192.168.4.3';
+    }
+  });
   const [isFetchingDirect, setIsFetchingDirect] = useState<boolean>(false);
   
   // Camera capture modal/video
@@ -406,8 +412,12 @@ export const AIDiseaseDetectionPage: React.FC<AIDiseaseDetectionPageProps> = ({ 
                   <input
                     type="text"
                     value={esp32Ip}
-                    onChange={(e) => setEsp32Ip(e.target.value)}
-                    placeholder="192.168.1.150"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEsp32Ip(val);
+                      try { localStorage.setItem('agrirover_cam_ip', val); } catch {}
+                    }}
+                    placeholder="192.168.4.3"
                     className="w-full sm:w-36 px-2.5 py-1 rounded-lg bg-agri-card border border-agri-border text-agri-offwhite font-mono outline-none focus:border-agri-lime"
                   />
                 </div>
